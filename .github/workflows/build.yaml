@@ -119,6 +119,7 @@ jobs:
     - name: Initialize and sync kernel repository
       run: |
         cd $WORKAREA/gki-kernel
+        curl -o manifest_${{ env.MANIFEST_NUM }}.xml "https://raw.githubusercontent.com/enskye/kernel_patches/refs/heads/main/manifest_13722573.xml"
         repo init -u https://android.googlesource.com/kernel/manifest
         cp -p "../manifest_${{ env.MANIFEST_NUM }}.xml" .repo/manifests/
         repo init -m "manifest_${{ env.MANIFEST_NUM }}.xml"
