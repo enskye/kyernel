@@ -46,7 +46,7 @@ jobs:
         repo init -u https://android.googlesource.com/kernel/manifest
         cp ../manifest_13722573.xml .repo/manifests/
         repo init -m manifest_13722573.xml
-        repo sync -j$(nproc --all)
+        repo --trace sync -j$(nproc --all)
 
     - name: 7. Copy SuSFS Patches
       working-directory: ./gki-kernel
