@@ -94,14 +94,6 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-    - name: Download magiskboot
-      run: |
-        cd ~/.bin
-        wget -O magiskboot.zip https://github.com/xiaoxindada/magisk_bins_ndk/releases/latest/download/x86-64.zip
-        unzip magiskboot.zip
-        chmod +x magiskboot
-        rm magiskboot.zip
-
     - name: Create work area
       run: |
         mkdir -p $WORKAREA
