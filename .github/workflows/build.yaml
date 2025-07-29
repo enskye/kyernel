@@ -1,91 +1,32 @@
-name: Build KernelSU-Next with SuSFS for GKI
+name: Build KernelSU-Next with SuSFS GKI
 
 on:
   workflow_dispatch:
-    inputs:
-      device_codename:
-        description: 'Device codename (e.g., lynx for Pixel 7a)'
-        required: true
-        default: 'lynx'
-        type: string
-      manifest_number:
-        description: 'Manifest number from GKI release builds'
-        required: true
-        default: '14210'
-        type: string
-      kernel_branch:
-        description: 'Kernel branch'
-        required: true
-        default: 'android14-6.1'
-        type: string
-      build_config:
-        description: 'Build configuration'
-        required: true
-        default: 'kernel_aarch64'
-        type: choice
-        options:
-          - kernel_aarch64
-          - kernel_x86_64
-      upload_artifacts:
-        description: 'Upload build artifacts'
-        required: true
-        default: true
-        type: boolean
+  push:
+    branches:
+      - main
 
 jobs:
-  build:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 480  # 8 hours max build time
-    
+  build-kernelsu:
+    runs-on: ubuntu-latest
+
+    env:
+      REPO_PATH: ${{ github.workspace }}/repo
+      WORKAREA: ${{ github.workspace }}/workarea
+      GKI_KERNEL: ${{ github.workspace }}/workarea/gki-kernel
+      SUSFS_REPO: susfs4ksu
+      SUSFS_BRANCH: gki-android14-6.1-dev
+      KERNEL_REPO_MANIFEST: manifest_xxxxx.xml
+      KERNEL_REPO_MANIFEST_URL: https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_xxxxx.xml
+
     steps:
-    - name: Maximize build space
-      uses: easimon/maximize-build-space@master
-      with:
-        root-reserve-mb: 512
-        swap-size-mb: 1024
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-
-    - name: Checkout repository
-      uses: actions/checkout@v4
-
-    - name: Set up environment variables
-      run: |
-        echo "WORKAREA=${{ github.workspace }}/workarea" >> $GITHUB_ENV
-        echo "DEVICE_CODENAME=${{ inputs.device_codename }}" >> $GITHUB_ENV
-        echo "MANIFEST_NUM=${{ inputs.manifest_number }}" >> $GITHUB_ENV
-        echo "KERNEL_BRANCH=${{ inputs.kernel_branch }}" >> $GITHUB_ENV
-        echo "BUILD_CONFIG=${{ inputs.build_config }}" >> $GITHUB_ENV
+    - name: Checkout this repository
+      uses: actions/checkout@v3
 
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          git \
-          curl \
-          wget \
-          python3 \
-          python3-pip \
-          build-essential \
-          libssl-dev \
-          libncurses5-dev \
-          libelf-dev \
-          bison \
-          flex \
-          bc \
-          rsync \
-          zip \
-          unzip \
-          lz4 \
-          zstd
-
-    - name: Install Bazel
-      run: |
-        wget -O bazel.deb https://github.com/bazelbuild/bazel/releases/download/6.4.0/bazel_6.4.0-linux-x86_64.deb
-        sudo dpkg -i bazel.deb || sudo apt-get install -f -y
-        bazel --version
+        sudo apt-get install -y git curl repo rsync bazel build-essential
 
     - name: Setup repo tool
       run: |
@@ -94,306 +35,55 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-
-
-    - name: Create work area
+    - name: Create workarea
       run: |
         mkdir -p $WORKAREA
         cd $WORKAREA
+        mkdir gki-kernel android-kernel
 
-    - name: Clone kernel patches repository and get manifest
+    - name: Download manifest file from enskye repo
+      run: |
+        curl -o $WORKAREA/$KERNEL_REPO_MANIFEST $KERNEL_REPO_MANIFEST_URL
+
+    - name: Initialize kernel repo with manifest
+      run: |
+        cd $GKI_KERNEL
+        repo init -u https://android.googlesource.com/kernel/manifest
+        cp -p $WORKAREA/$KERNEL_REPO_MANIFEST .repo/manifests/
+        repo init -m $KERNEL_REPO_MANIFEST
+        repo sync
+
+    - name: Clone susfs4ksu repo
+      run: |
+        git clone -b $SUSFS_BRANCH https://gitlab.com/pershoot/susfs4ksu.git $WORKAREA/$SUSFS_REPO
+
+    - name: Create mirror and apply patches
       run: |
         cd $WORKAREA
-        echo "Cloning kernel patches repository..."
-        git clone https://github.com/enskye/kernel_patches.git
-        
-        # Look for manifest files in the repository
-        echo "Looking for manifest files..."
-        find kernel_patches/ -name "*.xml" -type f | head -10
-        
-        # Try to find a manifest that matches our requirements
-        MANIFEST_FILE=""
-        if [ -f "kernel_patches/manifest_${{ env.MANIFEST_NUM }}.xml" ]; then
-          MANIFEST_FILE="kernel_patches/manifest_${{ env.MANIFEST_NUM }}.xml"
-          echo "Found specific manifest: $MANIFEST_FILE"
-        elif [ -f "kernel_patches/manifest.xml" ]; then
-          MANIFEST_FILE="kernel_patches/manifest.xml" 
-          echo "Found generic manifest: $MANIFEST_FILE"
-        else
-          # Look for any manifest file that might work
-          MANIFEST_FILE=$(find kernel_patches/ -name "manifest*.xml" -type f | head -1)
-          if [ -n "$MANIFEST_FILE" ]; then
-            echo "Found alternative manifest: $MANIFEST_FILE"
-          fi
-        fi
-        
-        if [ -n "$MANIFEST_FILE" ] && [ -f "$MANIFEST_FILE" ]; then
-          cp "$MANIFEST_FILE" "manifest_${{ env.MANIFEST_NUM }}.xml"
-          echo "Using manifest from kernel_patches repository"
-          echo "Manifest content preview:"
-          head -15 "manifest_${{ env.MANIFEST_NUM }}.xml"
-        else
-          echo "No suitable manifest found in repository, creating default one"
-          cat > "manifest_${{ env.MANIFEST_NUM }}.xml" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<manifest>
-  <remote name="aosp" fetch="https://android.googlesource.com/" />
-  <default revision="refs/heads/common-android14-6.1" remote="aosp" />
-  
-  <project path="build" name="kernel/build" />
-  <project path="common" name="kernel/common" />
-  <project path="prebuilts/build-tools" name="kernel/prebuilts/build-tools" clone-depth="1" />
-  <project path="prebuilts/clang/host/linux-x86" name="platform/prebuilts/clang/host/linux-x86" clone-depth="1" />
-  <project path="prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9" name="platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9" clone-depth="1" />
-  <project path="prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9" name="platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9" clone-depth="1" />
-  <project path="prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9" name="platform/prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9" clone-depth="1" />
-  <project path="tools/bazel" name="kernel/tools/bazel" />
-</manifest>
-EOF
-        fi
-
-    - name: Clone SuSFS repository
-      run: |
-        cd $WORKAREA
-        # Check if SuSFS is already in the kernel_patches repo
-        if [ -d "kernel_patches/susfs4ksu" ]; then
-          echo "SuSFS found in kernel_patches repository"
-          ln -s kernel_patches/susfs4ksu susfs4ksu
-        elif [ -d "kernel_patches" ] && find kernel_patches -name "*susfs*" -type d | grep -q .; then
-          echo "Found SuSFS-related directory in kernel_patches"
-          SUSFS_DIR=$(find kernel_patches -name "*susfs*" -type d | head -1)
-          ln -s "$SUSFS_DIR" susfs4ksu
-        else
-          echo "SuSFS not found in kernel_patches, cloning separately"
-          git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-${{ env.KERNEL_BRANCH }}-dev
-        fi
-        
-        # Verify we have the necessary files
-        if [ -d "susfs4ksu/kernel_patches" ] || [ -d "kernel_patches" ]; then
-          echo "SuSFS kernel patches directory found"
-          ls -la susfs4ksu/ 2>/dev/null || ls -la kernel_patches/
-        else
-          echo "Warning: SuSFS patches may not be available"
-        fi
-
-    - name: Setup kernel source directories
-      run: |
-        cd $WORKAREA
-        mkdir -p gki-kernel android-kernel
-
-    - name: Initialize and sync kernel repository
-      run: |
-        cd $WORKAREA/gki-kernel
-        
-        # Initialize repo with default manifest first
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ env.KERNEL_BRANCH }}
-        
-        # Check if we have a valid custom manifest, otherwise use default
-        if [ -s "../manifest_${{ env.MANIFEST_NUM }}.xml" ] && grep -q "<manifest" "../manifest_${{ env.MANIFEST_NUM }}.xml"; then
-          echo "Using custom manifest"
-          cp -p "../manifest_${{ env.MANIFEST_NUM }}.xml" .repo/manifests/
-          repo init -m "manifest_${{ env.MANIFEST_NUM }}.xml"
-        else
-          echo "Using default manifest for branch common-${{ env.KERNEL_BRANCH }}"
-        fi
-        
-        # Sync with retry mechanism
-        for i in {1..3}; do
-          if repo sync -j$(nproc) --no-clone-bundle --fail-fast; then
-            echo "Repo sync successful"
-            break
-          else
-            echo "Repo sync failed, attempt $i/3"
-            if [ $i -eq 3 ]; then
-              echo "Final attempt failed, exiting"
-              exit 1
-            fi
-            sleep 30
-          fi
-        done
-
-    - name: Create working mirror
-      run: |
-        cd $WORKAREA
-        rsync -a --del gki-kernel/ gki-14/
-
-    - name: Copy SuSFS files and patches
-      run: |
-        cd $WORKAREA/gki-14
-        
-        # Determine the source directory for SuSFS patches
-        SUSFS_PATCHES_DIR=""
-        if [ -d "../susfs4ksu/kernel_patches" ]; then
-          SUSFS_PATCHES_DIR="../susfs4ksu/kernel_patches"
-        elif [ -d "../kernel_patches" ]; then
-          SUSFS_PATCHES_DIR="../kernel_patches"
-        else
-          echo "Error: Cannot find SuSFS patches directory"
-          exit 1
-        fi
-        
-        echo "Using SuSFS patches from: $SUSFS_PATCHES_DIR"
-        
-        # Copy filesystem patches
-        if [ -d "$SUSFS_PATCHES_DIR/fs" ]; then
-          cp -p $SUSFS_PATCHES_DIR/fs/* common/fs/ 2>/dev/null || echo "No fs patches to copy"
-        fi
-        
-        # Copy include files
-        if [ -d "$SUSFS_PATCHES_DIR/include/linux" ]; then
-          cp -p $SUSFS_PATCHES_DIR/include/linux/* common/include/linux/ 2>/dev/null || echo "No include patches to copy"
-        fi
-        
-        # Copy patch files
-        PATCH_FILE_1="50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch"
-        PATCH_FILE_2="60_scope-minimized_manual_hooks.patch"
-        
-        if [ -f "$SUSFS_PATCHES_DIR/$PATCH_FILE_1" ]; then
-          cp -p "$SUSFS_PATCHES_DIR/$PATCH_FILE_1" common/
-        elif [ -f "$SUSFS_PATCHES_DIR/50_add_susfs_in_gki.patch" ]; then
-          cp -p "$SUSFS_PATCHES_DIR/50_add_susfs_in_gki.patch" "common/$PATCH_FILE_1"
-        else
-          echo "Warning: Primary SuSFS patch not found"
-          find $SUSFS_PATCHES_DIR -name "*susfs*.patch" -o -name "*50*.patch" | head -5
-        fi
-        
-        if [ -f "$SUSFS_PATCHES_DIR/$PATCH_FILE_2" ]; then
-          cp -p "$SUSFS_PATCHES_DIR/$PATCH_FILE_2" common/
-        elif [ -f "$SUSFS_PATCHES_DIR/60_scope-minimized_manual_hooks.patch" ]; then
-          cp -p "$SUSFS_PATCHES_DIR/60_scope-minimized_manual_hooks.patch" common/
-        else
-          echo "Warning: Manual hooks patch not found"
-          find $SUSFS_PATCHES_DIR -name "*manual*.patch" -o -name "*60*.patch" | head -5
-        fi
-        
-        # List what we copied
-        echo "Files copied to common/:"
-        ls -la common/*.patch 2>/dev/null || echo "No patch files found in common/"
-
-    - name: Apply SuSFS patches
-      run: |
-        cd $WORKAREA/gki-14/common
-        patch -p1 < 50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch
+        rsync -a --del gki-kernel/ gki-14
+        cd gki-14
+        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs
+        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common
+        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common
+        cd common
+        patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 < 60_scope-minimized_manual_hooks.patch
-
-    - name: Install KernelSU-Next
-      run: |
-        cd $WORKAREA/gki-14
-        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
-
-    - name: Remove protected exports
-      run: |
-        cd $WORKAREA/gki-14
+        cd ..
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
-        rm -f common/android/abi_gki_protected_exports_* \
-              common/50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch \
-              common/60_scope-minimized_manual_hooks.patch
+        rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
 
-    - name: Commit changes to local repository
+    - name: Commit patch changes
       run: |
         cd $WORKAREA/gki-14/common
-        git config user.email "action@github.com"
-        git config user.name "GitHub Action"
         git add -A
-        git commit -m "Add KernelSU-Next-susfs for ${{ env.DEVICE_CODENAME }}"
+        git commit -m "Add KernelSU-Next-susfs" || echo "No changes to commit"
 
-    - name: Build kernel
+    - name: Build kernel with bazel
       run: |
         cd $WORKAREA/gki-14
-        tools/bazel run --config=fast --config=stamp --lto=thin //common:${{ env.BUILD_CONFIG }}_dist -- --dist_dir=../android-kernel
+        tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
-    - name: Prepare kernel artifacts
+    - name: Output build result files
       run: |
-        cd $WORKAREA/android-kernel
-        mkdir -p kernel
-        
-        # List all files for debugging
-        echo "=== Build artifacts ==="
-        find . -type f -name "*.img" -o -name "Image*" -o -name "*.ko" | head -20
-        
-        # Copy kernel image
-        if [ -f "Image" ]; then
-          cp Image kernel/
-        elif [ -f "Image.lz4" ]; then
-          cp Image.lz4 kernel/
-        elif [ -f "Image.gz" ]; then
-          cp Image.gz kernel/
-        fi
-        
-        # Copy device tree files if they exist
-        find . -name "*.dtb" -exec cp {} kernel/ \; 2>/dev/null || true
-        find . -name "dtbo.img" -exec cp {} kernel/ \; 2>/dev/null || true
-
-    - name: Create build info
-      run: |
-        cd $WORKAREA/android-kernel
-        cat > build_info.txt << EOF
-        Build Information:
-        ==================
-        Device: ${{ env.DEVICE_CODENAME }}
-        Kernel Branch: ${{ env.KERNEL_BRANCH }}
-        Manifest: ${{ env.MANIFEST_NUM }}
-        Build Config: ${{ env.BUILD_CONFIG }}
-        Build Date: $(date)
-        Commit: $(cd ../gki-14/common && git rev-parse HEAD)
-        
-        KernelSU-Next: Enabled
-        SuSFS: Integrated
-        
-        Files included:
-        $(find kernel/ -type f | sort)
-        EOF
-
-    - name: Upload kernel artifacts
-      if: ${{ inputs.upload_artifacts }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernelsu-next-susfs-${{ env.DEVICE_CODENAME }}-${{ env.KERNEL_BRANCH }}
-        path: |
-          ${{ env.WORKAREA }}/android-kernel/kernel/
-          ${{ env.WORKAREA }}/android-kernel/build_info.txt
-        retention-days: 30
-
-    - name: Create release archives
-      if: ${{ inputs.upload_artifacts }}
-      run: |
-        cd $WORKAREA/android-kernel
-        tar -czf kernelsu-next-susfs-${{ env.DEVICE_CODENAME }}-$(date +%Y%m%d).tar.gz kernel/ build_info.txt
-        zip -r kernelsu-next-susfs-${{ env.DEVICE_CODENAME }}-$(date +%Y%m%d).zip kernel/ build_info.txt
-
-    - name: Upload release archives
-      if: ${{ inputs.upload_artifacts }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernelsu-next-susfs-archives-${{ env.DEVICE_CODENAME }}
-        path: |
-          ${{ env.WORKAREA }}/android-kernel/*.tar.gz
-          ${{ env.WORKAREA }}/android-kernel/*.zip
-        retention-days: 90
-
-    - name: Build summary
-      run: |
-        cd $WORKAREA/android-kernel
-        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "**Device:** ${{ env.DEVICE_CODENAME }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Kernel Branch:** ${{ env.KERNEL_BRANCH }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Build Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Artifacts Created:" >> $GITHUB_STEP_SUMMARY
-        find kernel/ -type f | while read file; do
-          echo "- \`$file\` ($(du -h "$file" | cut -f1))" >> $GITHUB_STEP_SUMMARY
-        done
-
-  notify:
-    needs: build
-    runs-on: ubuntu-latest
-    if: always()
-    steps:
-    - name: Notify build status
-      run: |
-        if [ "${{ needs.build.result }}" == "success" ]; then
-          echo "✅ KernelSU-Next with SuSFS build completed successfully!"
-        else
-          echo "❌ KernelSU-Next with SuSFS build failed!"
-          exit 1
-        fi
+        ls -l $WORKAREA/android-kernel
