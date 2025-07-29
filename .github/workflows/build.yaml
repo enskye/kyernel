@@ -1,0 +1,274 @@
+name: Build KernelSU-Next with SuSFS for GKI
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_codename:
+        description: 'Device codename (e.g., lynx for Pixel 7a)'
+        required: true
+        default: 'lynx'
+        type: string
+      manifest_number:
+        description: 'Manifest number from GKI release builds'
+        required: true
+        default: '14210'
+        type: string
+      kernel_branch:
+        description: 'Kernel branch'
+        required: true
+        default: 'android14-6.1'
+        type: string
+      build_config:
+        description: 'Build configuration'
+        required: true
+        default: 'kernel_aarch64'
+        type: choice
+        options:
+          - kernel_aarch64
+          - kernel_x86_64
+      upload_artifacts:
+        description: 'Upload build artifacts'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 480  # 8 hours max build time
+    
+    steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 512
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up environment variables
+      run: |
+        echo "WORKAREA=${{ github.workspace }}/workarea" >> $GITHUB_ENV
+        echo "DEVICE_CODENAME=${{ inputs.device_codename }}" >> $GITHUB_ENV
+        echo "MANIFEST_NUM=${{ inputs.manifest_number }}" >> $GITHUB_ENV
+        echo "KERNEL_BRANCH=${{ inputs.kernel_branch }}" >> $GITHUB_ENV
+        echo "BUILD_CONFIG=${{ inputs.build_config }}" >> $GITHUB_ENV
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          git \
+          curl \
+          wget \
+          python3 \
+          python3-pip \
+          build-essential \
+          libssl-dev \
+          libncurses5-dev \
+          libelf-dev \
+          bison \
+          flex \
+          bc \
+          rsync \
+          zip \
+          unzip \
+          lz4 \
+          zstd
+
+    - name: Install Bazel
+      run: |
+        wget -O bazel.deb https://github.com/bazelbuild/bazel/releases/download/6.4.0/bazel_6.4.0-linux-x86_64.deb
+        sudo dpkg -i bazel.deb || sudo apt-get install -f -y
+        bazel --version
+
+    - name: Setup repo tool
+      run: |
+        mkdir -p ~/.bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+        chmod a+x ~/.bin/repo
+        echo "$HOME/.bin" >> $GITHUB_PATH
+
+    - name: Download magiskboot
+      run: |
+        cd ~/.bin
+        wget -O magiskboot.zip https://github.com/xiaoxindada/magisk_bins_ndk/releases/latest/download/x86-64.zip
+        unzip magiskboot.zip
+        chmod +x magiskboot
+        rm magiskboot.zip
+
+    - name: Create work area
+      run: |
+        mkdir -p $WORKAREA
+        cd $WORKAREA
+
+    - name: Download kernel manifest
+      run: |
+        cd $WORKAREA
+        # Download the manifest file
+        curl -o "manifest_${{ env.MANIFEST_NUM }}.xml" \
+          "https://android.googlesource.com/kernel/manifest/+/refs/tags/android-mainline-${{ env.MANIFEST_NUM }}/default.xml?format=TEXT" | base64 -d > "manifest_${{ env.MANIFEST_NUM }}.xml"
+
+    - name: Clone SuSFS repository
+      run: |
+        cd $WORKAREA
+        git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-${{ env.KERNEL_BRANCH }}-dev
+
+    - name: Setup kernel source directories
+      run: |
+        cd $WORKAREA
+        mkdir -p gki-kernel android-kernel
+
+    - name: Initialize and sync kernel repository
+      run: |
+        cd $WORKAREA/gki-kernel
+        repo init -u https://android.googlesource.com/kernel/manifest
+        cp -p "../manifest_${{ env.MANIFEST_NUM }}.xml" .repo/manifests/
+        repo init -m "manifest_${{ env.MANIFEST_NUM }}.xml"
+        repo sync -j$(nproc) --no-clone-bundle
+
+    - name: Create working mirror
+      run: |
+        cd $WORKAREA
+        rsync -a --del gki-kernel/ gki-14/
+
+    - name: Copy SuSFS files and patches
+      run: |
+        cd $WORKAREA/gki-14
+        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch common/
+        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+
+    - name: Apply SuSFS patches
+      run: |
+        cd $WORKAREA/gki-14/common
+        patch -p1 < 50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch
+        patch -p1 < 60_scope-minimized_manual_hooks.patch
+
+    - name: Install KernelSU-Next
+      run: |
+        cd $WORKAREA/gki-14
+        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+
+    - name: Remove protected exports
+      run: |
+        cd $WORKAREA/gki-14
+        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
+        rm -f common/android/abi_gki_protected_exports_* \
+              common/50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch \
+              common/60_scope-minimized_manual_hooks.patch
+
+    - name: Commit changes to local repository
+      run: |
+        cd $WORKAREA/gki-14/common
+        git config user.email "action@github.com"
+        git config user.name "GitHub Action"
+        git add -A
+        git commit -m "Add KernelSU-Next-susfs for ${{ env.DEVICE_CODENAME }}"
+
+    - name: Build kernel
+      run: |
+        cd $WORKAREA/gki-14
+        tools/bazel run --config=fast --config=stamp --lto=thin //common:${{ env.BUILD_CONFIG }}_dist -- --dist_dir=../android-kernel
+
+    - name: Prepare kernel artifacts
+      run: |
+        cd $WORKAREA/android-kernel
+        mkdir -p kernel
+        
+        # List all files for debugging
+        echo "=== Build artifacts ==="
+        find . -type f -name "*.img" -o -name "Image*" -o -name "*.ko" | head -20
+        
+        # Copy kernel image
+        if [ -f "Image" ]; then
+          cp Image kernel/
+        elif [ -f "Image.lz4" ]; then
+          cp Image.lz4 kernel/
+        elif [ -f "Image.gz" ]; then
+          cp Image.gz kernel/
+        fi
+        
+        # Copy device tree files if they exist
+        find . -name "*.dtb" -exec cp {} kernel/ \; 2>/dev/null || true
+        find . -name "dtbo.img" -exec cp {} kernel/ \; 2>/dev/null || true
+
+    - name: Create build info
+      run: |
+        cd $WORKAREA/android-kernel
+        cat > build_info.txt << EOF
+        Build Information:
+        ==================
+        Device: ${{ env.DEVICE_CODENAME }}
+        Kernel Branch: ${{ env.KERNEL_BRANCH }}
+        Manifest: ${{ env.MANIFEST_NUM }}
+        Build Config: ${{ env.BUILD_CONFIG }}
+        Build Date: $(date)
+        Commit: $(cd ../gki-14/common && git rev-parse HEAD)
+        
+        KernelSU-Next: Enabled
+        SuSFS: Integrated
+        
+        Files included:
+        $(find kernel/ -type f | sort)
+        EOF
+
+    - name: Upload kernel artifacts
+      if: ${{ inputs.upload_artifacts }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernelsu-next-susfs-${{ env.DEVICE_CODENAME }}-${{ env.KERNEL_BRANCH }}
+        path: |
+          ${{ env.WORKAREA }}/android-kernel/kernel/
+          ${{ env.WORKAREA }}/android-kernel/build_info.txt
+        retention-days: 30
+
+    - name: Create release archives
+      if: ${{ inputs.upload_artifacts }}
+      run: |
+        cd $WORKAREA/android-kernel
+        tar -czf kernelsu-next-susfs-${{ env.DEVICE_CODENAME }}-$(date +%Y%m%d).tar.gz kernel/ build_info.txt
+        zip -r kernelsu-next-susfs-${{ env.DEVICE_CODENAME }}-$(date +%Y%m%d).zip kernel/ build_info.txt
+
+    - name: Upload release archives
+      if: ${{ inputs.upload_artifacts }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernelsu-next-susfs-archives-${{ env.DEVICE_CODENAME }}
+        path: |
+          ${{ env.WORKAREA }}/android-kernel/*.tar.gz
+          ${{ env.WORKAREA }}/android-kernel/*.zip
+        retention-days: 90
+
+    - name: Build summary
+      run: |
+        cd $WORKAREA/android-kernel
+        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "**Device:** ${{ env.DEVICE_CODENAME }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Kernel Branch:** ${{ env.KERNEL_BRANCH }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Build Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Artifacts Created:" >> $GITHUB_STEP_SUMMARY
+        find kernel/ -type f | while read file; do
+          echo "- \`$file\` ($(du -h "$file" | cut -f1))" >> $GITHUB_STEP_SUMMARY
+        done
+
+  notify:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Notify build status
+      run: |
+        if [ "${{ needs.build.result }}" == "success" ]; then
+          echo "✅ KernelSU-Next with SuSFS build completed successfully!"
+        else
+          echo "❌ KernelSU-Next with SuSFS build failed!"
+          exit 1
+        fi
