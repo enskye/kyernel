@@ -94,22 +94,87 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
+
+
     - name: Create work area
       run: |
         mkdir -p $WORKAREA
         cd $WORKAREA
 
-    - name: Download kernel manifest
+    - name: Clone kernel patches repository and get manifest
       run: |
         cd $WORKAREA
-        # Download the manifest file
-        curl -o "manifest_${{ env.MANIFEST_NUM }}.xml" \
-          "https://android.googlesource.com/kernel/manifest/+/refs/tags/android-mainline-${{ env.MANIFEST_NUM }}/default.xml?format=TEXT" | base64 -d > "manifest_${{ env.MANIFEST_NUM }}.xml"
+        echo "Cloning kernel patches repository..."
+        git clone https://github.com/enskye/kernel_patches.git
+        
+        # Look for manifest files in the repository
+        echo "Looking for manifest files..."
+        find kernel_patches/ -name "*.xml" -type f | head -10
+        
+        # Try to find a manifest that matches our requirements
+        MANIFEST_FILE=""
+        if [ -f "kernel_patches/manifest_${{ env.MANIFEST_NUM }}.xml" ]; then
+          MANIFEST_FILE="kernel_patches/manifest_${{ env.MANIFEST_NUM }}.xml"
+          echo "Found specific manifest: $MANIFEST_FILE"
+        elif [ -f "kernel_patches/manifest.xml" ]; then
+          MANIFEST_FILE="kernel_patches/manifest.xml" 
+          echo "Found generic manifest: $MANIFEST_FILE"
+        else
+          # Look for any manifest file that might work
+          MANIFEST_FILE=$(find kernel_patches/ -name "manifest*.xml" -type f | head -1)
+          if [ -n "$MANIFEST_FILE" ]; then
+            echo "Found alternative manifest: $MANIFEST_FILE"
+          fi
+        fi
+        
+        if [ -n "$MANIFEST_FILE" ] && [ -f "$MANIFEST_FILE" ]; then
+          cp "$MANIFEST_FILE" "manifest_${{ env.MANIFEST_NUM }}.xml"
+          echo "Using manifest from kernel_patches repository"
+          echo "Manifest content preview:"
+          head -15 "manifest_${{ env.MANIFEST_NUM }}.xml"
+        else
+          echo "No suitable manifest found in repository, creating default one"
+          cat > "manifest_${{ env.MANIFEST_NUM }}.xml" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+  <remote name="aosp" fetch="https://android.googlesource.com/" />
+  <default revision="refs/heads/common-android14-6.1" remote="aosp" />
+  
+  <project path="build" name="kernel/build" />
+  <project path="common" name="kernel/common" />
+  <project path="prebuilts/build-tools" name="kernel/prebuilts/build-tools" clone-depth="1" />
+  <project path="prebuilts/clang/host/linux-x86" name="platform/prebuilts/clang/host/linux-x86" clone-depth="1" />
+  <project path="prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9" name="platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9" clone-depth="1" />
+  <project path="prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9" name="platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9" clone-depth="1" />
+  <project path="prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9" name="platform/prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9" clone-depth="1" />
+  <project path="tools/bazel" name="kernel/tools/bazel" />
+</manifest>
+EOF
+        fi
 
     - name: Clone SuSFS repository
       run: |
         cd $WORKAREA
-        git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-${{ env.KERNEL_BRANCH }}-dev
+        # Check if SuSFS is already in the kernel_patches repo
+        if [ -d "kernel_patches/susfs4ksu" ]; then
+          echo "SuSFS found in kernel_patches repository"
+          ln -s kernel_patches/susfs4ksu susfs4ksu
+        elif [ -d "kernel_patches" ] && find kernel_patches -name "*susfs*" -type d | grep -q .; then
+          echo "Found SuSFS-related directory in kernel_patches"
+          SUSFS_DIR=$(find kernel_patches -name "*susfs*" -type d | head -1)
+          ln -s "$SUSFS_DIR" susfs4ksu
+        else
+          echo "SuSFS not found in kernel_patches, cloning separately"
+          git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-${{ env.KERNEL_BRANCH }}-dev
+        fi
+        
+        # Verify we have the necessary files
+        if [ -d "susfs4ksu/kernel_patches" ] || [ -d "kernel_patches" ]; then
+          echo "SuSFS kernel patches directory found"
+          ls -la susfs4ksu/ 2>/dev/null || ls -la kernel_patches/
+        else
+          echo "Warning: SuSFS patches may not be available"
+        fi
 
     - name: Setup kernel source directories
       run: |
@@ -119,11 +184,33 @@ jobs:
     - name: Initialize and sync kernel repository
       run: |
         cd $WORKAREA/gki-kernel
-        git clone https://github.com/enskye/kernel_patches.git -b main
-        repo init -u https://android.googlesource.com/kernel/manifest
-        cp -p "../manifest_${{ env.MANIFEST_NUM }}.xml" .repo/manifests/
-        repo init -m "manifest_${{ env.MANIFEST_NUM }}.xml"
-        repo sync -j$(nproc) --no-clone-bundle
+        
+        # Initialize repo with default manifest first
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-${{ env.KERNEL_BRANCH }}
+        
+        # Check if we have a valid custom manifest, otherwise use default
+        if [ -s "../manifest_${{ env.MANIFEST_NUM }}.xml" ] && grep -q "<manifest" "../manifest_${{ env.MANIFEST_NUM }}.xml"; then
+          echo "Using custom manifest"
+          cp -p "../manifest_${{ env.MANIFEST_NUM }}.xml" .repo/manifests/
+          repo init -m "manifest_${{ env.MANIFEST_NUM }}.xml"
+        else
+          echo "Using default manifest for branch common-${{ env.KERNEL_BRANCH }}"
+        fi
+        
+        # Sync with retry mechanism
+        for i in {1..3}; do
+          if repo sync -j$(nproc) --no-clone-bundle --fail-fast; then
+            echo "Repo sync successful"
+            break
+          else
+            echo "Repo sync failed, attempt $i/3"
+            if [ $i -eq 3 ]; then
+              echo "Final attempt failed, exiting"
+              exit 1
+            fi
+            sleep 30
+          fi
+        done
 
     - name: Create working mirror
       run: |
@@ -133,10 +220,55 @@ jobs:
     - name: Copy SuSFS files and patches
       run: |
         cd $WORKAREA/gki-14
-        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
-        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch common/
-        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+        
+        # Determine the source directory for SuSFS patches
+        SUSFS_PATCHES_DIR=""
+        if [ -d "../susfs4ksu/kernel_patches" ]; then
+          SUSFS_PATCHES_DIR="../susfs4ksu/kernel_patches"
+        elif [ -d "../kernel_patches" ]; then
+          SUSFS_PATCHES_DIR="../kernel_patches"
+        else
+          echo "Error: Cannot find SuSFS patches directory"
+          exit 1
+        fi
+        
+        echo "Using SuSFS patches from: $SUSFS_PATCHES_DIR"
+        
+        # Copy filesystem patches
+        if [ -d "$SUSFS_PATCHES_DIR/fs" ]; then
+          cp -p $SUSFS_PATCHES_DIR/fs/* common/fs/ 2>/dev/null || echo "No fs patches to copy"
+        fi
+        
+        # Copy include files
+        if [ -d "$SUSFS_PATCHES_DIR/include/linux" ]; then
+          cp -p $SUSFS_PATCHES_DIR/include/linux/* common/include/linux/ 2>/dev/null || echo "No include patches to copy"
+        fi
+        
+        # Copy patch files
+        PATCH_FILE_1="50_add_susfs_in_gki-${{ env.KERNEL_BRANCH }}.patch"
+        PATCH_FILE_2="60_scope-minimized_manual_hooks.patch"
+        
+        if [ -f "$SUSFS_PATCHES_DIR/$PATCH_FILE_1" ]; then
+          cp -p "$SUSFS_PATCHES_DIR/$PATCH_FILE_1" common/
+        elif [ -f "$SUSFS_PATCHES_DIR/50_add_susfs_in_gki.patch" ]; then
+          cp -p "$SUSFS_PATCHES_DIR/50_add_susfs_in_gki.patch" "common/$PATCH_FILE_1"
+        else
+          echo "Warning: Primary SuSFS patch not found"
+          find $SUSFS_PATCHES_DIR -name "*susfs*.patch" -o -name "*50*.patch" | head -5
+        fi
+        
+        if [ -f "$SUSFS_PATCHES_DIR/$PATCH_FILE_2" ]; then
+          cp -p "$SUSFS_PATCHES_DIR/$PATCH_FILE_2" common/
+        elif [ -f "$SUSFS_PATCHES_DIR/60_scope-minimized_manual_hooks.patch" ]; then
+          cp -p "$SUSFS_PATCHES_DIR/60_scope-minimized_manual_hooks.patch" common/
+        else
+          echo "Warning: Manual hooks patch not found"
+          find $SUSFS_PATCHES_DIR -name "*manual*.patch" -o -name "*60*.patch" | head -5
+        fi
+        
+        # List what we copied
+        echo "Files copied to common/:"
+        ls -la common/*.patch 2>/dev/null || echo "No patch files found in common/"
 
     - name: Apply SuSFS patches
       run: |
