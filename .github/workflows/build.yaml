@@ -91,7 +91,7 @@ jobs:
         tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
     - name: 13. Upload Kernel Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: kernel-image
         path: android-kernel/
