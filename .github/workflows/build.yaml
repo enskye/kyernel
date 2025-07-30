@@ -74,8 +74,8 @@ jobs:
         rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
         
     - name: 11. Deleted -dirty tag
-      working-directory: ./gki-14
       run: |
+        cd gki-kernel
         sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl || echo "No stamp.bzl!" 
         sed -i 's/-dirty//' ./common/scripts/setlocalversion 
         sed -i 's/-dirty//' ./msm-kernel/scripts/setlocalversion 
