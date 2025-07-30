@@ -72,7 +72,15 @@ jobs:
       run: |
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
-
+        
+    - name: 11. Commit Changes
+      working-directory: ./gki-14/common
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git add -A
+        git commit -a -m "Add KernelSU-Next-susfs"
+        
     - name: 12. Build the Kernel
       run: |
         cd gki-kernel
