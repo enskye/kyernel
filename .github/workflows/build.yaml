@@ -8,7 +8,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: 1. Install Dependencies & Setup Tools
+    - name: Maximize Build Space
+      uses: AdityaGarg8/remove-unwanted-software@v5
+      with:
+          remove-dotnet: 'true'          # Frees ~2 GB
+          remove-android: 'true'         # Frees ~9 GB
+          remove-haskell: 'true'         # Frees ~5.2 GB
+          remove-codeql: 'true'          # Frees ~5.4 GB
+          remove-docker-images: 'true'   # Frees ~3.2 GB
+          remove-large-packages: 'true'  # Frees ~3.1 GB
+          remove-swapfile: 'true'        # Frees ~4 GB
+          remove-cached-tools: 'false'   # Avoid unless confirmed safe
+          verbose: 'true'                # Enable detailed logging
+ 
+    - name: Install Dependencies & Setup Tools
       run: |
         # Add Bazel's apt repository
         sudo apt-get update
@@ -27,20 +40,20 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-    - name: 2. Download Manifest File
+    - name: Download Manifest File
       run: |
         # Please replace 'your_manifest_file.xml' with the actual filename from the enskye/kernel_patches repo.
         curl -o manifest_13722573.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
 
-    - name: 3. Clone SuSFS Repository
+    - name: Clone SuSFS Repository
       run: |
         git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
 
-    - name: 4. Create Directories
+    - name: Create Directories
       run: |
         mkdir gki-kernel android-kernel
 
-    - name: 5. Pull Down GKI Repository
+    - name: Pull Down GKI Repository
       working-directory: ./gki-kernel
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
@@ -48,7 +61,7 @@ jobs:
         repo init -m manifest_13722573.xml
         repo --trace sync -j$(nproc --all)
 
-    - name: 7. Copy SuSFS Patches
+    - name: Copy SuSFS Patches
       working-directory: ./gki-kernel
       run: |
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs
@@ -56,24 +69,24 @@ jobs:
         cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common
         cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common
 
-    - name: 8. Apply Patches
+    - name: Apply Patches
       working-directory: ./gki-kernel/common
       run: |
         patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 < 60_scope-minimized_manual_hooks.patch
 
-    - name: 9. Integrate KernelSU-Next
+    - name: Integrate KernelSU-Next
       working-directory: ./gki-kernel
       run: |
         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
-    - name: 10. Clean Up Patches and Exports
+    - name: Clean Up Patches and Exports
       working-directory: ./gki-kernel
       run: |
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
         
-    - name: 11. Deleted -dirty tag
+    - name: Rename kernel
       run: |
         cd gki-kernel
         echo 'echo "-kyernel"' > ./common/scripts/setlocalversion
@@ -81,12 +94,12 @@ jobs:
         sed -i 's/-dirty//' ./common/scripts/setlocalversion 
         sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
         
-    - name: 12. Build the Kernel
+    - name: Build the Kernel
       run: |
         cd gki-kernel
         tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
-    - name: 13. Upload Kernel Artifact
+    - name: Upload Kernel Artifact
       uses: actions/upload-artifact@v4
       with:
         name: kernel-image
