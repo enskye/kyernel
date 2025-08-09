@@ -58,7 +58,7 @@ jobs:
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
         cp ../kernel_patches/manifest_husky.xml .repo/manifests/
-        repo init -m --depth=1 manifest_husky.xml
+        repo init --depth=1 -m manifest_husky.xml
         repo --trace sync -j$(nproc --all)
 
     - name: Copy SuSFS Patches
