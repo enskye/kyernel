@@ -42,7 +42,7 @@ jobs:
 
     - name: Download Manifest File
       run: |
-        curl -LSs manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
+        curl -LSs manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13884750.xml
 
     - name: Clone Repositories
       run: |
