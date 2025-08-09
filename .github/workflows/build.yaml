@@ -40,8 +40,8 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-    - name: Download Manifest File
-      run: |
+    #- name: Download Manifest File
+      #run: |
         # Please replace 'your_manifest_file.xml' with the actual filename from the enskye/kernel_patches repo.
         #curl -o manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
 
@@ -57,8 +57,8 @@ jobs:
       working-directory: ./gki-kernel
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
-        cp ../kernel_patches/manifest_husky.xml .repo/manifests/
-        repo init --depth=1 -m manifest_husky.xml
+        cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
+        repo init --depth=1 -m manifest_13884750.xml
         repo --trace sync -j$(nproc --all)
 
     - name: Copy SuSFS Patches
@@ -88,11 +88,11 @@ jobs:
         
     - name: Rename kernel
       run: |
-        #cd gki-kernel
-        #echo 'echo "-kyernel"' > ./common/scripts/setlocalversion
-        #sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl || echo "No stamp.bzl!" 
-        #sed -i 's/-dirty//' ./common/scripts/setlocalversion 
-        #sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
+        cd gki-kernel
+        echo 'echo "-kyernel"' > ./common/scripts/setlocalversion
+        sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl || echo "No stamp.bzl!" 
+        sed -i 's/-dirty//' ./common/scripts/setlocalversion 
+        sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
         
     - name: Build the Kernel
       run: |
