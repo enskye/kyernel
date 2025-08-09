@@ -43,7 +43,7 @@ jobs:
     - name: Download Manifest File
       run: |
         # Please replace 'your_manifest_file.xml' with the actual filename from the enskye/kernel_patches repo.
-        curl -o manifest_13722573.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
+        curl -o manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
 
     - name: Clone SuSFS Repository
       run: |
