@@ -48,7 +48,7 @@ jobs:
     - name: Clone SuSFS Repository
       run: |
         git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
-
+        git clone https://github.com/enskye/kernel_patches.git -b main
     - name: Create Directories
       run: |
         mkdir gki-kernel android-kernel
@@ -57,7 +57,7 @@ jobs:
       working-directory: ./gki-kernel
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
-        cp ../manifest_13884750.xml .repo/manifests/
+        cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
         repo init -m manifest_13884750.xml
         repo --trace sync -j$(nproc --all)
 
