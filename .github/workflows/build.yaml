@@ -8,18 +8,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    #- name: Maximize Build Space
-      #uses: AdityaGarg8/remove-unwanted-software@v5
-      #with:
-          #remove-dotnet: 'true'          # Frees ~2 GB
-          #remove-android: 'true'         # Frees ~9 GB
-          #remove-haskell: 'true'         # Frees ~5.2 GB
-          #remove-codeql: 'true'          # Frees ~5.4 GB
-          #remove-docker-images: 'true'   # Frees ~3.2 GB
-          #remove-large-packages: 'true'  # Frees ~3.1 GB
-          #remove-swapfile: 'true'        # Frees ~4 GB
-          #remove-cached-tools: 'false'   # Avoid unless confirmed safe
-          #verbose: 'true'                # Enable detailed logging
+    - name: Maximize Build Space
+      uses: AdityaGarg8/remove-unwanted-software@v5
+      with:
+          remove-dotnet: 'true'          # Frees ~2 GB
+          remove-android: 'true'         # Frees ~9 GB
+          remove-haskell: 'true'         # Frees ~5.2 GB
+          remove-codeql: 'true'          # Frees ~5.4 GB
+          remove-docker-images: 'true'   # Frees ~3.2 GB
+          remove-large-packages: 'true'  # Frees ~3.1 GB
+          remove-swapfile: 'true'        # Frees ~4 GB
+          remove-cached-tools: 'false'   # Avoid unless confirmed safe
+          verbose: 'false'                # Enable detailed logging
  
     - name: Install Dependencies & Setup Tools
       run: |
@@ -40,15 +40,15 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-    #- name: Download Manifest File
-      #run: |
-        # Please replace 'your_manifest_file.xml' with the actual filename from the enskye/kernel_patches repo.
-        #curl -o manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
+    - name: Download Manifest File
+      run: |
+        curl -LSs manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13722573.xml
 
-    - name: Clone SuSFS Repository
+    - name: Clone Repositories
       run: |
         git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
-        git clone https://github.com/enskye/kernel_patches.git -b main
+        #git clone https://github.com/enskye/kernel_patches.git -b main
+        
     - name: Create Directories
       run: |
         mkdir gki-kernel android-kernel
@@ -57,11 +57,11 @@ jobs:
       working-directory: ./gki-kernel
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
-        cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
+        cp ../manifest_13884750.xml .repo/manifests/
         repo init --depth=1 -m manifest_13884750.xml
         repo --trace sync -j$(nproc --all)
 
-    - name: Copy SuSFS Patches
+    - name: Copy Patches
       working-directory: ./gki-kernel
       run: |
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs
