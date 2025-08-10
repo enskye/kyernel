@@ -94,25 +94,24 @@ jobs:
         # Copy our built kernel image from the 'android-kernel' directory
         cp android-kernel/Image.lz4 AnyKernel3/
 
-        # Set kernel information in anykernel.sh (optional but recommended)
+        # Set kernel information in anykernel.sh
         cd AnyKernel3
-        ZIP_NAME="kyernel-gki-$(date +%Y%m%d-%H%M)"
-        sed -i "s/kernel.string=.*/kernel.string=$ZIP_NAME by enskye/" anykernel.sh
+        sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
 
         # Create the zip package
-        zip -r9 "${ZIP_NAME}.zip" * -x .git README.md *placeholder
+        zip -r9 "kyernel-temp.zip" * -x .git README.md *placeholder
         
-        # Create a directory for the final upload and move the zip there
+        # Create a release directory and move the zip there with a static, predictable name
         cd ..
         mkdir -p release
-        mv AnyKernel3/*.zip release/
+        mv AnyKernel3/kyernel-temp.zip release/kyernel-$(date +%Y%m%d).zip
 
     - name: Upload Flashable Kernel Zip
       uses: actions/upload-artifact@v4
       with:
-        name: kyernel-flashable
-        path: release/kyernel-gki-*.zip
-        
+        # By providing a direct path to a single file, the action uploads it as-is.
+        # The artifact name will automatically be the name of the file ('kyernel-flashable.zip').
+        path: release/kyernel-flashable.zip
     #- name: Upload Kernel Artifact
       #uses: actions/upload-artifact@v4
       #with:
