@@ -40,14 +40,14 @@ jobs:
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-    - name: Download Manifest File
-      run: |
-        curl -LSs manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13884750.xml
+   # - name: Download Manifest File
+     # run: |
+      #  curl -LSs manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13884750.xml
 
     - name: Clone Repositories
       run: |
         git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
-        #git clone https://github.com/enskye/kernel_patches.git -b main
+        git clone https://github.com/enskye/kernel_patches.git -b main
         
     - name: Create Directories
       run: |
@@ -57,7 +57,7 @@ jobs:
       working-directory: ./gki-kernel
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
-        cp ../manifest_13884750.xml .repo/manifests/
+        cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
         repo init --depth=1 -m manifest_13884750.xml
         repo --trace sync -j$(nproc --all)
 
