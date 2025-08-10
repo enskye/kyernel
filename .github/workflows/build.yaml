@@ -86,32 +86,46 @@ jobs:
         cd gki-kernel
         tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
         
+    - name: Check Build Output
+      run: |
+        echo "Listing files in the output directory (android-kernel):"
+        ls -lR android-kernel/
+
     - name: Package into AnyKernel3 zip
       run: |
-        # Clone the AnyKernel3 repository
+        # IMPORTANT: Check the log from the 'Check Build Output' step above.
+        # This script assumes the kernel image is 'Image.lz4'. If your build
+        # created a different file (e.g., 'Image.gz', 'Image'), you must
+        # change the filename in the KERNEL_IMAGE variable below.
+        KERNEL_IMAGE="android-kernel/Image.lz4"
+
+        echo "Looking for kernel image at: $KERNEL_IMAGE"
+        if [ ! -f "$KERNEL_IMAGE" ]; then
+          echo "::error::Kernel image not found at $KERNEL_IMAGE!"
+          echo "Please check the 'Check Build Output' log to see what files were actually created."
+          exit 1
+        fi
+
         git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
-
-        # Copy our built kernel image from the 'android-kernel' directory
-        cp android-kernel/Image.lz4 AnyKernel3/
-
-        # Set kernel information in anykernel.sh
+        cp "$KERNEL_IMAGE" AnyKernel3/
         cd AnyKernel3
         sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
-
-        # Create the zip package
         zip -r9 "kyernel-temp.zip" * -x .git README.md *placeholder
-        
-        # Create a release directory and move the zip there with a static, predictable name
         cd ..
         mkdir -p release
-        mv AnyKernel3/kyernel-temp.zip release/kyernel-$(date +%Y%m%d).zip
+        mv AnyKernel3/kyernel-temp.zip release/kyernel-flashable.zip
+
+    # --- NEW DEBUGGING STEP 2 ---
+    - name: Verify Final Directory Structure
+      run: |
+        echo "Listing the workspace contents before upload:"
+        ls -R
 
     - name: Upload Flashable Kernel Zip
       uses: actions/upload-artifact@v4
       with:
-        # By providing a direct path to a single file, the action uploads it as-is.
-        # The artifact name will automatically be the name of the file ('kyernel-flashable.zip').
         path: release/kyernel-flashable.zip
+        
     #- name: Upload Kernel Artifact
       #uses: actions/upload-artifact@v4
       #with:
