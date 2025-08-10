@@ -85,9 +85,36 @@ jobs:
       run: |
         cd gki-kernel
         tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        
+    - name: Package into AnyKernel3 zip
+      run: |
+        # Clone the AnyKernel3 repository
+        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
 
-    - name: Upload Kernel Artifact
+        # Copy our built kernel image from the 'android-kernel' directory
+        cp android-kernel/Image.lz4 AnyKernel3/
+
+        # Set kernel information in anykernel.sh (optional but recommended)
+        cd AnyKernel3
+        ZIP_NAME="kyernel-gki-$(date +%Y%m%d-%H%M)"
+        sed -i "s/kernel.string=.*/kernel.string=$ZIP_NAME by enskye/" anykernel.sh
+
+        # Create the zip package
+        zip -r9 "${ZIP_NAME}.zip" * -x .git README.md *placeholder
+        
+        # Create a directory for the final upload and move the zip there
+        cd ..
+        mkdir -p release
+        mv AnyKernel3/*.zip release/
+
+    - name: Upload Flashable Kernel Zip
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-image
-        path: android-kernel/
+        name: kyernel-flashable
+        path: release/kyernel-gki-*.zip
+        
+    #- name: Upload Kernel Artifact
+      #uses: actions/upload-artifact@v4
+      #with:
+        #name: kernel-image
+        #path: android-kernel/
