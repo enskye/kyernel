@@ -45,7 +45,7 @@ jobs:
       run: |
         repo init -u https://android.googlesource.com/kernel/manifest
         cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
-        repo init --depth=1 -m manifest_13884750.xml
+        repo init -m manifest_13884750.xml
         repo --trace sync -j$(nproc --all)
 
     - name: Copy Patches
@@ -65,7 +65,7 @@ jobs:
     - name: Integrate KernelSU-Next
       working-directory: ./gki-kernel
       run: |
-        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs kprobes
+        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
     - name: Clean Up Patches and Exports
       working-directory: ./gki-kernel
