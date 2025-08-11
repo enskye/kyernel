@@ -65,7 +65,7 @@ jobs:
     - name: Integrate KernelSU-Next
       working-directory: ./gki-kernel
       run: |
-        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs kprobes
 
     - name: Clean Up Patches and Exports
       working-directory: ./gki-kernel
