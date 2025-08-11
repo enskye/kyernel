@@ -106,7 +106,7 @@ jobs:
           exit 1
         fi
 
-        git clone https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+        git clone https://github.com/enskye/AnyKernel3.git -b gki-2.0
         cp "$KERNEL_IMAGE" AnyKernel3/
         cd AnyKernel3
         sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
