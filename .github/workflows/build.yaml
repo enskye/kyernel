@@ -6,128 +6,111 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
     - name: Install Dependencies & Setup Tools
       run: |
+        sudo apt-get update
+        sudo apt-get install -y apt-transport-https curl gnupg git rsync
         # Add Bazel's apt repository
-        sudo apt-get update
-        sudo apt-get install -y apt-transport-https curl gnupg
-        curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > bazel.gpg
-        sudo mv bazel.gpg /etc/apt/trusted.gpg.d/
+        curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/bazel.gpg > /dev/null
         echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
-        
-        # Install all dependencies
+        # Install Bazel
         sudo apt-get update
-        sudo apt-get install -y git curl rsync bazel
-        
+        sudo apt-get install -y bazel
         # Setup 'repo' tool
         mkdir -p ~/.bin
         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
         chmod a+x ~/.bin/repo
         echo "$HOME/.bin" >> $GITHUB_PATH
 
-   # - name: Download Manifest File
-     # run: |
-      #  curl -LSs manifest_13884750.xml https://raw.githubusercontent.com/enskye/kernel_patches/main/manifest_13884750.xml
-
-    - name: Clone Repositories
+    - name: Clone Source Repositories
       run: |
         git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
         git clone https://github.com/enskye/kernel_patches.git -b main
-        
-    - name: Create Directories
-      run: |
-        mkdir gki-kernel android-kernel
 
-    - name: Pull Down GKI Repository
-      working-directory: ./gki-kernel
+    - name: Initialize and Sync GKI Repository
       run: |
+        mkdir gki-kernel
+        cd gki-kernel
         repo init -u https://android.googlesource.com/kernel/manifest
         cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
-        repo init -m manifest_13884750.xml
-        repo --trace sync -j$(nproc --all)
+        repo init --depth=1 -m manifest_13884750.xml
+        repo sync -j$(nproc --all)
 
-    - name: Copy Patches
+    - name: Copy and Apply Patches
       working-directory: ./gki-kernel
       run: |
-        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs
-        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux
-        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common
-        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common
-
-    - name: Apply Patches
-      working-directory: ./gki-kernel/common
-      run: |
+        # Copy kernel files
+        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        # Copy and apply patch files
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+        cd common
         patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 < 60_scope-minimized_manual_hooks.patch
 
     - name: Integrate KernelSU-Next
       working-directory: ./gki-kernel
-      run: |
-        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+      run: curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
-    - name: Clean Up Patches and Exports
+    - name: Clean Up Patches and Build Files
       working-directory: ./gki-kernel
       run: |
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
-        
-    - name: Rename kernel
-      run: |
-        cd gki-kernel
-        echo 'echo "-kyernel"' > ./common/scripts/setlocalversion
-        sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" ./build/kernel/kleaf/impl/stamp.bzl || echo "No stamp.bzl!" 
-        sed -i 's/-dirty//' ./common/scripts/setlocalversion 
-        sed -i 's/-dirty//' ./build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
-        
-    - name: Build the Kernel
-      run: |
-        cd gki-kernel
-        tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
-        
-    - name: Check Build Output
-      run: |
-        echo "Listing files in the output directory (android-kernel):"
-        ls -lR android-kernel/
 
-    - name: Package into AnyKernel3 zip
+    - name: Set Custom Kernel Version
+      working-directory: ./gki-kernel
       run: |
-        # IMPORTANT: Check the log from the 'Check Build Output' step above.
-        # This script assumes the kernel image is 'Image.lz4'. If your build
-        # created a different file (e.g., 'Image.gz', 'Image'), you must
-        # change the filename in the KERNEL_IMAGE variable below.
+        echo 'echo "-kyernel"' > common/scripts/setlocalversion
+        sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" build/kernel/kleaf/impl/stamp.bzl || echo "No stamp.bzl!"
+        sed -i 's/-dirty//' common/scripts/setlocalversion
+        sed -i 's/-dirty//' build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
+
+    - name: Build the Kernel
+      working-directory: ./gki-kernel
+      run: tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+
+    - name: Package Kernel into Flashable Zip
+      run: |
+        # Define the path to the built kernel image
         KERNEL_IMAGE="android-kernel/Image.lz4"
 
-        echo "Looking for kernel image at: $KERNEL_IMAGE"
+        # Check if the kernel image exists before proceeding
         if [ ! -f "$KERNEL_IMAGE" ]; then
           echo "::error::Kernel image not found at $KERNEL_IMAGE!"
-          echo "Please check the 'Check Build Output' log to see what files were actually created."
           exit 1
         fi
 
+        # Clone AnyKernel3 repository
         git clone https://github.com/enskye/AnyKernel3.git -b gki-2.0
         cp "$KERNEL_IMAGE" AnyKernel3/
+
+        # Create the release directory for the final zip
+        mkdir -p release
+
+        # Enter AnyKernel3 directory, update properties, and create the zip
         cd AnyKernel3
         sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
-        zip -r9 "kyernel-temp.zip" * -x .git README.md *placeholder
-        cd ..
-        mkdir -p release
-        mv AnyKernel3/kyernel-temp.zip release/kyernel-flashable.zip
+        zip -r9 "../release/kyernel-flashable-$(date +%Y%m%d).zip" * -x .git README.md *placeholder
 
-    # --- NEW DEBUGGING STEP 2 ---
-    - name: Verify Final Directory Structure
-      run: |
-        echo "Listing the workspace contents before upload:"
-        ls -R
-
-    - name: Upload Flashable Kernel Zip
-      uses: actions/upload-artifact@v4
+    - name: Create Release and Upload Kernel
+      uses: softprops/action-gh-release@v2
       with:
-        path: release/kyernel-flashable.zip
+        # Upload all zip files from the release directory
+        files: release/*.zip
+        # Name of the release in the GitHub UI
+        name: "kyernel Build #${{ github.run_number }} (${{ env.BUILD_DATE }})"
+        # Git tag for this release
+        tag_name: "kyernel-${{ github.run_number }}"
+        # Description for the release
+        body: |
+          Automated GKI kernel build with KernelSU.
+          Flashable zip attached below.
+        # Mark this as the "Latest" release
+        make_latest: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BUILD_DATE: $(date +'%Y-%m-%d')
         
-    #- name: Upload Kernel Artifact
-      #uses: actions/upload-artifact@v4
-      #with:
-        #name: kernel-image
-        #path: android-kernel/
