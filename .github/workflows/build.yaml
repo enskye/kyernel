@@ -34,7 +34,7 @@ jobs:
         cd gki-kernel
         repo init -u https://android.googlesource.com/kernel/manifest
         cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
-        repo init -m manifest_13884750.xml --depth=1
+        repo init --depth=1 -m manifest_13884750.xml
         repo sync -j$(nproc --all)
 
     - name: Copy and Apply Patches
