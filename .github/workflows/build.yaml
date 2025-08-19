@@ -73,19 +73,7 @@ jobs:
       run: |
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
-        
-    - name: Set boot sign key
-    env:
-        BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
-        run: |
-          if [ ! -z "$BOOT_SIGN_KEY" ]; then
-            echo "$BOOT_SIGN_KEY" > ./kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem
-            echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
-          else
-            echo "BOOT_SIGN_KEY is not set. Using AOSP sign key..."
-            echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/kernel-build-tools/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
-          fi
-          
+
     - name: Set Custom Kernel Version
       working-directory: ./gki-kernel
       run: |
