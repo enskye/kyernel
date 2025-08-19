@@ -11,24 +11,27 @@ jobs:
     - name: Maximize Build Space
       uses: AdityaGarg8/remove-unwanted-software@v5
       with:
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
-          remove-large-packages: 'true'
-          remove-swapfile: 'true'
-          remove-cached-tools: 'false'
+          remove-dotnet: 'true'          # Frees ~2 GB
+          remove-android: 'true'         # Frees ~9 GB
+          remove-haskell: 'true'         # Frees ~5.2 GB
+          remove-codeql: 'true'          # Frees ~5.4 GB
+          remove-docker-images: 'true'   # Frees ~3.2 GB
+          remove-large-packages: 'true'  # Frees ~3.1 GB
+          remove-swapfile: 'true'        # Frees ~4 GB
+          remove-cached-tools: 'false'   # Avoid unless confirmed safe
           verbose: 'false'
           
     - name: Install Dependencies & Setup Tools
       run: |
         sudo apt-get update
         sudo apt-get install -y apt-transport-https curl gnupg git rsync
+        # Add Bazel's apt repository
         curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/bazel.gpg > /dev/null
         echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
+        # Install Bazel
         sudo apt-get update
         sudo apt-get install -y bazel
+        # Setup 'repo' tool
         mkdir -p ~/.bin
         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
         chmod a+x ~/.bin/repo
@@ -51,8 +54,10 @@ jobs:
     - name: Copy and Apply Patches
       working-directory: ./gki-kernel
       run: |
+        # Copy kernel files
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
         cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        # Copy and apply patch files
         cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
         cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
         cd common
@@ -77,43 +82,29 @@ jobs:
         sed -i 's/-dirty//' common/scripts/setlocalversion
         sed -i 's/-dirty//' build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
 
-    - name: Set Boot Sign Key
-      id: sign_setup
-      env:
-        BOOT_SIGN_KEY_PEM: ${{ secrets.BOOT_SIGN_KEY_PEM }}
-        BOOT_SIGN_KEY_X509: ${{ secrets.BOOT_SIGN_KEY_X509 }}
-      run: |
-        if [ -n "$BOOT_SIGN_KEY_PEM" ] && [ -n "$BOOT_SIGN_KEY_X509" ]; then
-          echo "✅ Signing keys found, configuring for a signed build..."
-          mkdir -p ./gki-kernel/build/kernel
-          echo "$BOOT_SIGN_KEY_PEM" > ./gki-kernel/build/kernel/rsa.pem
-          echo "$BOOT_SIGN_KEY_X509" > ./gki-kernel/build/kernel/x509.pem
-          echo "SIGN_FLAG=--config=boot_sign" >> $GITHUB_ENV
-        else
-          echo "⚠️ Signing keys not found, proceeding with an unsigned build."
-        fi
-
-    - name: Define Boot Sign Config
-      if: env.SIGN_FLAG
-      working-directory: ./gki-kernel
-      run: |
-        echo "build:boot_sign --//build/kernel:sign_boot_image=true" > user.bazelrc
-        echo "✅ Created user.bazelrc to define boot_sign config."
-
     - name: Build the Kernel
       working-directory: ./gki-kernel
-      run: tools/bazel --bazelrc=user.bazelrc run --config=fast --config=stamp ${{ env.SIGN_FLAG }} --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+      run: tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
     - name: Package Kernel into Flashable Zip
       run: |
+        # Define the path to the built kernel image
         KERNEL_IMAGE="android-kernel/Image.lz4"
+
+        # Check if the kernel image exists before proceeding
         if [ ! -f "$KERNEL_IMAGE" ]; then
           echo "::error::Kernel image not found at $KERNEL_IMAGE!"
           exit 1
         fi
+
+        # Clone AnyKernel3 repository
         git clone https://github.com/enskye/AnyKernel3.git -b gki-2.0
         cp "$KERNEL_IMAGE" AnyKernel3/
+
+        # Create the release directory for the final zip
         mkdir -p release
+
+        # Enter AnyKernel3 directory, update properties, and create the zip
         cd AnyKernel3
         sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
         zip -r9 "../release/kyernel-$(date +%Y%m%d).zip" * -x .git README.md *placeholder
@@ -121,14 +112,22 @@ jobs:
     - name: Create Release and Upload Kernel
       uses: softprops/action-gh-release@v2
       with:
+        # Upload all zip files from the release directory
         files: release/*.zip
+        # Name of the release in the GitHub UI
         name: "kyernel Build #${{ github.run_number }} (${{ env.BUILD_DATE }})"
+        # Git tag for this release
         tag_name: "kyernel-${{ github.run_number }}"
+        # Description for the release
         body: |
           Automated GKI kernel build with KernelSU.
           Flashable zip attached below.
+        # Mark this as the "Latest" release
         make_latest: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         BUILD_DATE: $(date +'%Y-%m-%d')
         
+
+
+I would like to set boot sign key as a github secret variable
