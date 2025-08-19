@@ -82,6 +82,24 @@ jobs:
         sed -i 's/-dirty//' common/scripts/setlocalversion
         sed -i 's/-dirty//' build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
 
+    - name: Set Up Boot Signing Keys
+      working-directory: ./gki-kernel
+      run: |
+        # This step will only run if you create the secrets in your repo
+        if [ -n "${{ secrets.BOOT_SIGN_KEY_PEM }}" ] && [ -n "${{ secrets.BOOT_SIGN_KEY_X509 }}" ]; then
+          echo "✅ Signing keys found, configuring for a signed build..."
+          mkdir -p build/kernel
+          echo "${{ secrets.BOOT_SIGN_KEY_PEM }}" > build/kernel/rsa.pem
+          echo "${{ secrets.BOOT_SIGN_KEY_X509 }}" > build/kernel/x509.pem
+          echo "SIGN_FLAG=--config=boot_sign" >> $GITHUB_ENV
+        else
+          echo "⚠️ Signing keys not found, proceeding with an unsigned build."
+        fi
+
+    - name: Build the Kernel
+      working-directory: ./gki-kernel
+      run: tools/bazel run --config=fast --config=stamp ${{ env.SIGN_FLAG }} --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+
     - name: Build the Kernel
       working-directory: ./gki-kernel
       run: tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
