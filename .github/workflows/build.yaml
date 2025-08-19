@@ -75,7 +75,7 @@ jobs:
         rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
         
     - name: Set boot sign key
-      env:
+    env:
         BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
         run: |
           if [ ! -z "$BOOT_SIGN_KEY" ]; then
