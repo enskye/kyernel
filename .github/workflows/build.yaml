@@ -97,7 +97,7 @@ jobs:
       if: env.SIGN_FLAG
       working-directory: ./gki-kernel
       run: |
-        echo "build:boot_sign --//common:sign_boot_image=true" > user.bazelrc
+        echo "build:boot_sign --//build/kernel:sign_boot_image=true" > user.bazelrc
         echo "✅ Created user.bazelrc to define boot_sign config."
 
     - name: Build the Kernel
