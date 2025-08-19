@@ -139,7 +139,3 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         BUILD_DATE: $(date +'%Y-%m-%d')
-        
-
-
-I would like to set boot sign key as a github secret variable
