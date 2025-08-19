@@ -19,7 +19,7 @@ jobs:
           remove-large-packages: 'true'  # Frees ~3.1 GB
           remove-swapfile: 'true'        # Frees ~4 GB
           remove-cached-tools: 'false'   # Avoid unless confirmed safe
-          verbose: 'true'
+          verbose: 'false'
           
     - name: Install Dependencies & Setup Tools
       run: |
@@ -46,7 +46,7 @@ jobs:
       run: |
         mkdir gki-kernel
         cd gki-kernel
-        repo init -u https://android.googlesource.com/kernel/manifest
+        repo init --depth=1 -u https://android.googlesource.com/kernel/manifest
         cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
         repo init --depth=1 -m manifest_13884750.xml
         repo sync
@@ -107,7 +107,7 @@ jobs:
         # Enter AnyKernel3 directory, update properties, and create the zip
         cd AnyKernel3
         sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
-        zip -r9 "../release/kyernel-flashable-$(date +%Y%m%d).zip" * -x .git README.md *placeholder
+        zip -r9 "../release/kyernel-$(date +%Y%m%d).zip" * -x .git README.md *placeholder
 
     - name: Create Release and Upload Kernel
       uses: softprops/action-gh-release@v2
