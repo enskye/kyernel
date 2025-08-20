@@ -105,6 +105,9 @@ jobs:
           cd gki-kernel
         fi
         
+        git config --global user.email "you@example.com"
+        git config --global user.name "Your Name"
+        
         # Use parallel jobs for faster sync
         repo sync -j$(nproc) --current-branch --no-tags --optimized-fetch
 
