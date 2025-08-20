@@ -9,7 +9,6 @@ on:
 
 env:
   BAZEL_VERSION: "7.0.0"
-  BUILD_DATE: ${{ github.event.head_commit.timestamp || github.run_id }}
 
 jobs:
   build:
@@ -196,6 +195,14 @@ jobs:
           zip -r9 "../release/kyernel-${BUILD_DATE}.zip" * -x .git README.md *placeholder
         fi
 
+    - name: Set build date
+      id: date
+      run: |
+        BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
+        echo "date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+        echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+        echo "Build date set to: ${BUILD_DATE}"
+
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       if: always()
@@ -211,7 +218,7 @@ jobs:
       if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
       with:
         files: release/*.zip
-        name: "kyernel Build #${{ github.run_number }} (${{ steps.date.outputs.date }})"
+        name: "kyernel Build #${{ github.run_number }} (${{ env.BUILD_DATE }})"
         tag_name: "kyernel-${{ github.run_number }}"
         body: |
           ## 🚀 kyernel GKI Build
@@ -219,24 +226,15 @@ jobs:
           **Build Information:**
           - Build Number: #${{ github.run_number }}
           - Commit: ${{ github.sha }}
-          - Build Date: ${{ steps.date.outputs.date }}
+          - Build Date: ${{ env.BUILD_DATE }}
           
           **Features:**
           - GKI Kernel with KernelSU-Next integration
-          - SUSFS support for advanced root management
-          - Optimized for Android 14
+          - SUSFS support for advanced root hiding
           
-          **Installation:**
-          1. Boot to recovery (TWRP/OrangeFox)
-          2. Flash the attached zip file
-          3. Reboot to system
           
           > ⚠️ **Warning**: This is an unofficial kernel build. Flash at your own risk.
         make_latest: true
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Set build date output
-      id: date
-      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
