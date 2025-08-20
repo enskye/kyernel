@@ -153,7 +153,7 @@ jobs:
           --jobs=$(nproc) \
           --local_ram_resources=$(($(free -m | awk 'NR==2{print $2}') * 2 / 3)) \
           --local_cpu_resources=$(nproc) \
-          --experimental_strict_action_env=false \
+          --incompatible_strict_action_env=false \
           //common:kernel_aarch64_dist
         
         # Copy dist files
@@ -231,7 +231,6 @@ jobs:
           **Features:**
           - GKI Kernel with KernelSU-Next integration
           - SUSFS support for advanced root hiding
-          
           
           > ⚠️ **Warning**: This is an unofficial kernel build. Flash at your own risk.
         make_latest: true
