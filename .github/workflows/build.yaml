@@ -2,76 +2,167 @@ name: Build GKI Kernel
 
 on:
   workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  BAZEL_VERSION: "7.0.0"
+  BUILD_DATE: ${{ github.event.head_commit.timestamp || github.run_id }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
+    timeout-minutes: 180  # 3 hours timeout
     
+    steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 8192
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+    
+    - name: Cache Dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/bazel
+          ~/.bin
+          /usr/local/bin/bazel
+        key: ${{ runner.os }}-build-deps-${{ env.BAZEL_VERSION }}-${{ hashFiles('**/*.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-build-deps-${{ env.BAZEL_VERSION }}-
+          ${{ runner.os }}-build-deps-
+
     - name: Install Dependencies & Setup Tools
       run: |
-        sudo apt-get update
-        sudo apt-get install -y apt-transport-https curl gnupg git rsync
-        # Add Bazel's apt repository
-        curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/bazel.gpg > /dev/null
-        echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
-        # Install Bazel
-        sudo apt-get update
-        sudo apt-get install -y bazel
-        # Setup 'repo' tool
-        mkdir -p ~/.bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-        chmod a+x ~/.bin/repo
+        # Update package lists only once
+        sudo apt-get update -q
+        
+        # Install required packages in one go
+        sudo apt-get install -y -qq \
+          apt-transport-https \
+          curl \
+          gnupg \
+          git \
+          rsync \
+          build-essential \
+          bc \
+          bison \
+          flex \
+          libssl-dev \
+          libelf-dev \
+          python3-pip
+        
+        # Check if Bazel is already cached
+        if [ ! -f "/usr/local/bin/bazel" ]; then
+          # Install Bazel using binary release (faster than apt)
+          curl -fsSL -o bazel-installer.sh "https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh"
+          chmod +x bazel-installer.sh
+          sudo ./bazel-installer.sh --bin=/usr/local/bin
+          rm bazel-installer.sh
+        fi
+        
+        # Setup 'repo' tool if not cached
+        if [ ! -f "$HOME/.bin/repo" ]; then
+          mkdir -p ~/.bin
+          curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+x ~/.bin/repo
+        fi
         echo "$HOME/.bin" >> $GITHUB_PATH
+
+    - name: Cache Source Repositories
+      uses: actions/cache@v4
+      with:
+        path: |
+          susfs4ksu
+          kernel_patches
+          gki-kernel/.repo
+        key: ${{ runner.os }}-source-repos-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-source-repos-
 
     - name: Clone Source Repositories
       run: |
-        git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
-        git clone https://github.com/enskye/kernel_patches.git -b main
+        # Clone in parallel for speed
+        git clone --depth=1 https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev &
+        git clone --depth=1 https://github.com/enskye/kernel_patches.git -b main &
+        wait  # Wait for both clones to complete
 
     - name: Initialize and Sync GKI Repository
       run: |
-        mkdir gki-kernel
-        cd gki-kernel
-        repo init -u https://android.googlesource.com/kernel/manifest
-        cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
-        repo init --depth=1 -m manifest_13884750.xml
-        repo sync
+        if [ ! -d "gki-kernel/.repo" ]; then
+          mkdir -p gki-kernel
+          cd gki-kernel
+          repo init -u https://android.googlesource.com/kernel/manifest --depth=1
+          cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
+          repo init --depth=1 -m manifest_13884750.xml
+        else
+          cd gki-kernel
+        fi
+        
+        # Use parallel jobs for faster sync
+        repo sync -j$(nproc) --current-branch --no-tags --optimized-fetch
 
     - name: Copy and Apply Patches
       working-directory: ./gki-kernel
       run: |
-        # Copy kernel files
-        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
-        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-        # Copy and apply patch files
+        # Use rsync for faster copying with checksum verification
+        rsync -av --checksum ../susfs4ksu/kernel_patches/fs/ common/fs/
+        rsync -av --checksum ../susfs4ksu/kernel_patches/include/linux/ common/include/linux/
+        
+        # Copy patch files
         cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
         cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+        
+        # Apply patches
         cd common
         patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 < 60_scope-minimized_manual_hooks.patch
 
     - name: Integrate KernelSU-Next
       working-directory: ./gki-kernel
-      run: curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+      run: |
+        curl -fsSL "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
     - name: Clean Up Patches and Build Files
       working-directory: ./gki-kernel
       run: |
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
-        rm common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
+        rm -f common/android/abi_gki_protected_exports_* \
+              common/50_add_susfs_in_gki-android14-6.1.patch \
+              common/60_scope-minimized_manual_hooks.patch
 
     - name: Set Custom Kernel Version
       working-directory: ./gki-kernel
       run: |
         echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
-        #sed -i "/stable_scmversion_cmd/s/-maybe-dirty//g" build/kernel/kleaf/impl/stamp.bzl || echo "No stamp.bzl!"
-        #sed -i 's/-dirty//' common/scripts/setlocalversion
-        #sed -i 's/-dirty//' build/kernel/kleaf/workspace_status_stamp.py || echo "No workspace_status_stamp.py!"
 
     - name: Build the Kernel
       working-directory: ./gki-kernel
-      run: tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+      run: |
+        # Use optimal Bazel settings for CI
+        tools/bazel build \
+          --config=fast \
+          --config=stamp \
+          --lto=thin \
+          --jobs=$(nproc) \
+          --ram_utilization_factor=67 \
+          --local_ram_resources="HOST_RAM*0.67" \
+          --local_cpu_resources="HOST_CPUS*0.8" \
+          //common:kernel_aarch64_dist
+        
+        # Copy dist files
+        tools/bazel run \
+          --config=fast \
+          --config=stamp \
+          --lto=thin \
+          //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
     - name: Package Kernel into Flashable Zip
       run: |
@@ -81,11 +172,12 @@ jobs:
         # Check if the kernel image exists before proceeding
         if [ ! -f "$KERNEL_IMAGE" ]; then
           echo "::error::Kernel image not found at $KERNEL_IMAGE!"
+          ls -la android-kernel/ || echo "android-kernel directory not found"
           exit 1
         fi
 
-        # Clone AnyKernel3 repository
-        git clone https://github.com/enskye/AnyKernel3.git -b gki-2.0
+        # Clone AnyKernel3 repository with minimal depth
+        git clone --depth=1 https://github.com/enskye/AnyKernel3.git -b gki-2.0
         cp "$KERNEL_IMAGE" AnyKernel3/
 
         # Create the release directory for the final zip
@@ -93,24 +185,58 @@ jobs:
 
         # Enter AnyKernel3 directory, update properties, and create the zip
         cd AnyKernel3
-        sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-$(date +%Y%m%d) by enskye/" anykernel.sh
-        zip -r9 "../release/kyernel-$(date +%Y%m%d).zip" * -x .git README.md *placeholder
+        BUILD_DATE=$(date +%Y%m%d)
+        sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-${BUILD_DATE} by enskye/" anykernel.sh
+        
+        # Use pigz for faster compression if available
+        if command -v pigz >/dev/null 2>&1; then
+          export PIGZ="-9"
+          zip -r "../release/kyernel-${BUILD_DATE}.zip" * -x .git README.md *placeholder
+        else
+          zip -r9 "../release/kyernel-${BUILD_DATE}.zip" * -x .git README.md *placeholder
+        fi
+
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: kernel-build-${{ github.run_number }}
+        path: |
+          release/*.zip
+          android-kernel/
+        retention-days: 7
 
     - name: Create Release and Upload Kernel
       uses: softprops/action-gh-release@v2
+      if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
       with:
-        # Upload all zip files from the release directory
         files: release/*.zip
-        # Name of the release in the GitHub UI
-        name: "kyernel Build #${{ github.run_number }} (${{ env.BUILD_DATE }})"
-        # Git tag for this release
+        name: "kyernel Build #${{ github.run_number }} (${{ steps.date.outputs.date }})"
         tag_name: "kyernel-${{ github.run_number }}"
-        # Description for the release
         body: |
-          Automated GKI kernel build with KernelSU.
-          Flashable zip attached below.
-        # Mark this as the "Latest" release
+          ## 🚀 kyernel GKI Build
+          
+          **Build Information:**
+          - Build Number: #${{ github.run_number }}
+          - Commit: ${{ github.sha }}
+          - Build Date: ${{ steps.date.outputs.date }}
+          
+          **Features:**
+          - GKI Kernel with KernelSU-Next integration
+          - SUSFS support for advanced root management
+          - Optimized for Android 14
+          
+          **Installation:**
+          1. Boot to recovery (TWRP/OrangeFox)
+          2. Flash the attached zip file
+          3. Reboot to system
+          
+          > ⚠️ **Warning**: This is an unofficial kernel build. Flash at your own risk.
         make_latest: true
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        BUILD_DATE: $(date +'%Y-%m-%d')
+
+    - name: Set build date output
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_OUTPUT
