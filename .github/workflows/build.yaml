@@ -152,9 +152,9 @@ jobs:
           --config=stamp \
           --lto=thin \
           --jobs=$(nproc) \
-          --ram_utilization_factor=67 \
-          --local_ram_resources="HOST_RAM*0.67" \
-          --local_cpu_resources="HOST_CPUS*0.8" \
+          --local_ram_resources=$(($(free -m | awk 'NR==2{print $2}') * 2 / 3)) \
+          --local_cpu_resources=$(nproc) \
+          --experimental_strict_action_env=false \
           //common:kernel_aarch64_dist
         
         # Copy dist files
