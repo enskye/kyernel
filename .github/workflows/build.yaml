@@ -140,7 +140,7 @@ jobs:
     - name: Set Custom Kernel Version
       working-directory: ./gki-kernel
       run: |
-        echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
+        #echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
 
     - name: Build the Kernel
       working-directory: ./gki-kernel
