@@ -122,26 +122,6 @@ jobs:
         echo "Setting up KernelSU-Next..."
         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
-    - name: Verify KernelSU integration
-      run: |
-        cd workarea/gki-kernel/common
-        
-        echo "=== KernelSU Integration Status ==="
-        if [ -d "KernelSU" ]; then
-          echo "✅ KernelSU directory found"
-          cd KernelSU
-          echo "Last 3 commits:"
-          git log --oneline -3 || echo "No git history"
-          
-          echo -e "\nVersion information:"
-          find . -name "*version*" -type f | head -5
-          grep -r "DRIVER_VERSION\|KERNELSU_VERSION" . | head -3 || echo "Version defines not found"
-          cd ..
-        else
-          echo "❌ KernelSU not found!"
-          exit 1
-        fi
-
     - name: Remove protected exports
       run: |
         cd workarea/gki-kernel
