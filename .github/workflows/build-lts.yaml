@@ -191,6 +191,11 @@ jobs:
         
         # Clean up patch files
         rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
+        
+    - name: Set Custom Kernel Version
+      run: |
+        cd workarea/$WORK_DIR
+        echo 'echo "-kyernel"' > common/scripts/setlocalversion
 
     - name: Commit changes
       run: |
