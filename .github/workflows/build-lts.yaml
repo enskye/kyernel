@@ -1,1 +1,250 @@
 
+name: Build KernelSU-Next with SUSFS
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_type:
+        description: 'Kernel type to build'
+        required: true
+        default: 'gki'
+        type: choice
+        options:
+        - gki
+        - lts
+      manifest_number:
+        description: 'Manifest number (e.g., 15049146)'
+        required: true
+        type: string
+      build_config:
+        description: 'Build configuration'
+        required: false
+        default: 'fast'
+        type: choice
+        options:
+        - fast
+        - release
+        - debug
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 512
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev
+        
+        # Install repo
+        mkdir -p ~/.bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+        chmod a+x ~/.bin/repo
+        echo "$HOME/.bin" >> $GITHUB_PATH
+
+    - name: Set up Git
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git config --global init.defaultBranch main
+
+    - name: Create workspace
+      run: |
+        mkdir -p workarea
+        cd workarea
+
+    - name: Download manifest
+      run: |
+        cd workarea
+        curl -o manifest_${{ inputs.manifest_number }}.xml \
+          "https://android.googlesource.com/kernel/manifest/+/refs/tags/build-${{ inputs.manifest_number }}/default.xml?format=TEXT" | base64 --decode > manifest_${{ inputs.manifest_number }}.xml
+
+    - name: Clone SUSFS repository
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
+        else
+          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
+        fi
+
+    - name: Setup GKI Monthly (for both builds)
+      run: |
+        cd workarea
+        mkdir -p gki-kernel android-kernel
+        cd gki-kernel
+        repo init -u https://android.googlesource.com/kernel/manifest --depth=2
+        cp -p ../manifest_${{ inputs.manifest_number }}.xml .repo/manifests/
+        repo init -m manifest_${{ inputs.manifest_number }}.xml --depth=2
+        repo sync -c --no-tags
+
+    - name: Setup LTS kernel (if LTS build)
+      if: inputs.kernel_type == 'lts'
+      run: |
+        cd workarea
+        mkdir -p gki-lts-kernel
+        cd gki-lts-kernel
+        git clone --depth 2 --no-tags https://android.googlesource.com/kernel/common.git -b android14-6.1-lts
+        
+        # Copy necessary components from GKI Monthly
+        cd ..
+        for i in build tools prebuilts external .repo kernel common-modules; do 
+          rsync -a --del gki-kernel/$i/ gki-lts-kernel/$i/ 2>/dev/null || true
+        done
+        
+        cd gki-lts-kernel
+        ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+
+    - name: Create working mirror
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          rsync -a --del gki-lts-kernel/ gki-14-lts/
+          cd gki-14-lts
+        else
+          rsync -a --del gki-kernel/ gki-14/
+          cd gki-14
+        fi
+        rm -rf ../android-kernel/*
+
+    - name: Copy SUSFS module and patches
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cd gki-14-lts
+        else
+          cd gki-14
+        fi
+        
+        # Copy SUSFS files
+        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        else
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        fi
+        
+        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+
+    - name: Apply patches
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cd gki-14-lts/common
+        else
+          cd gki-14/common
+        fi
+        
+        # Apply SUSFS patches
+        if [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]]; then
+          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch
+        else
+          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
+        fi
+        
+        patch -p1 -ui 60_scope-minimized_manual_hooks.patch
+
+    - name: Setup KernelSU-Next
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cd gki-14-lts
+        else
+          cd gki-14
+        fi
+        
+        # Pull down KernelSU-Next and execute setup
+        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+
+    - name: Remove protected exports
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cd gki-14-lts
+        else
+          cd gki-14
+        fi
+        
+        # Remove protected exports for Wi-Fi and Bluetooth functionality
+        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
+        rm -f common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
+
+    - name: Commit changes
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cd gki-14-lts/common
+        else
+          cd gki-14/common
+        fi
+        
+        git add -A
+        git commit -a -m "Add KernelSU-Next-susfs with SUSFS integration"
+
+    - name: Build kernel
+      run: |
+        cd workarea
+        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
+          cd gki-14-lts
+        else
+          cd gki-14
+        fi
+        
+        # Build the kernel
+        tools/bazel run --config=${{ inputs.build_config }} --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+
+    - name: Prepare boot image components
+      run: |
+        cd workarea/android-kernel
+        mkdir -p kernel
+        
+        # List built artifacts
+        echo "Built kernel artifacts:"
+        ls -la
+        
+        # Copy kernel image if it exists
+        if [[ -f "Image" ]]; then
+          cp Image kernel/
+        elif [[ -f "Image.gz" ]]; then
+          cp Image.gz kernel/
+        fi
+
+    - name: Upload kernel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernelsu-susfs-${{ inputs.kernel_type }}-kernel-${{ inputs.manifest_number }}
+        path: |
+          workarea/android-kernel/
+        retention-days: 30
+
+    - name: Generate build summary
+      run: |
+        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Kernel Type**: ${{ inputs.kernel_type }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Manifest**: ${{ inputs.manifest_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Config**: ${{ inputs.build_config }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Artifacts Built:" >> $GITHUB_STEP_SUMMARY
+        cd workarea/android-kernel
+        for file in *; do
+          if [[ -f "$file" ]]; then
+            echo "- $file ($(stat -c%s "$file" | numfmt --to=iec-i))" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
