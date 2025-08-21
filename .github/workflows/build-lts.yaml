@@ -12,8 +12,8 @@ on:
         - gki
         - lts
       manifest_number:
-        description: 'Manifest number (e.g., 15049146)'
-        required: true
+        description: 'Manifest number (optional - will use latest android14-6.1 if not available)'
+        required: false
         type: string
       build_config:
         description: 'Build configuration'
@@ -65,12 +65,6 @@ jobs:
         mkdir -p workarea
         cd workarea
 
-    - name: Download manifest
-      run: |
-        cd workarea
-        curl -o manifest_${{ inputs.manifest_number }}.xml \
-          "https://android.googlesource.com/kernel/manifest/+/refs/tags/build-${{ inputs.manifest_number }}/default.xml?format=TEXT" | base64 --decode > manifest_${{ inputs.manifest_number }}.xml
-
     - name: Clone SUSFS repository
       run: |
         cd workarea
@@ -80,15 +74,45 @@ jobs:
           git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
         fi
 
-    - name: Setup GKI Monthly (for both builds)
+    - name: Setup kernel sources
       run: |
         cd workarea
         mkdir -p gki-kernel android-kernel
         cd gki-kernel
-        repo init -u https://android.googlesource.com/kernel/manifest --depth=2
-        cp -p ../manifest_${{ inputs.manifest_number }}.xml .repo/manifests/
-        repo init -m manifest_${{ inputs.manifest_number }}.xml --depth=2
-        repo sync -c --no-tags
+        
+        echo "Initializing kernel manifest repository..."
+        
+        # If a specific manifest number is provided, try to use it
+        if [[ -n "${{ inputs.manifest_number }}" ]]; then
+          echo "Checking for build-${{ inputs.manifest_number }} tag..."
+          if git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep -q "refs/tags/build-${{ inputs.manifest_number }}$"; then
+            echo "Found specific build tag, using build-${{ inputs.manifest_number }}"
+            repo init -u https://android.googlesource.com/kernel/manifest -b refs/tags/build-${{ inputs.manifest_number }} --depth=2
+          else
+            echo "Build tag not found, using latest android14-6.1 branch"
+            repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=2
+          fi
+        else
+          echo "No manifest number provided, using latest android14-6.1 branch"
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=2
+        fi
+        
+        echo "Starting repo sync..."
+        repo sync -c --no-tags -j$(nproc)
+        echo "Repo sync completed"
+        
+        # Verify we have the kernel sources
+        echo "Checking kernel sources:"
+        ls -la
+        if [[ -d "common" ]]; then
+          echo "✅ Common kernel directory found"
+          cd common
+          echo "Kernel version info:"
+          make kernelversion 2>/dev/null || echo "Could not determine kernel version"
+          cd ..
+        else
+          echo "❌ Common kernel directory not found"
+        fi
 
     - name: Setup LTS kernel (if LTS build)
       if: inputs.kernel_type == 'lts'
@@ -227,7 +251,7 @@ jobs:
     - name: Upload kernel artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernelsu-susfs-${{ inputs.kernel_type }}-kernel-${{ inputs.manifest_number }}
+        name: kernelsu-susfs-${{ inputs.kernel_type }}-kernel-${{ inputs.manifest_number || 'latest' }}
         path: |
           workarea/android-kernel/
         retention-days: 30
@@ -236,7 +260,7 @@ jobs:
       run: |
         echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
         echo "- **Kernel Type**: ${{ inputs.kernel_type }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Manifest**: ${{ inputs.manifest_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Manifest**: ${{ inputs.manifest_number || 'Latest android14-6.1' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Config**: ${{ inputs.build_config }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
