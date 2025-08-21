@@ -52,12 +52,10 @@ jobs:
         mkdir -p workarea
         cd workarea
         
-        # Determine kernel type (default to gki for scheduled runs)
-        KERNEL_TYPE="${{ inputs.kernel_type || 'gki' }}"
-        
         # Generate build timestamp
         BUILD_DATE=$(date +"%Y%m%d")
         BUILD_TIME=$(date +"%H%M")
+        KERNEL_TYPE="${{ inputs.kernel_type }}"
         KERNEL_NAME="kyernel-${KERNEL_TYPE}-${BUILD_DATE}-${BUILD_TIME}"
         
         echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
@@ -256,12 +254,35 @@ jobs:
         echo "✅ Created: $ZIP_NAME"
         echo "Package size: $(du -h $ZIP_NAME | cut -f1)"
 
-    - name: Upload AnyKernel3 package
-      uses: actions/upload-artifact@v4
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ env.KERNEL_NAME }}
         name: ${{ env.KERNEL_NAME }}
-        path: workarea/${{ env.KERNEL_NAME }}.zip
-        retention-days: 30
+        body: |
+          ## 🚀 KernelSU Build - ${{ env.KERNEL_NAME }}
+          
+          **Build Information:**
+          - **Kernel Type**: ${{ env.KERNEL_TYPE }}
+          - **Build Date**: ${{ env.BUILD_DATE }}
+          - **Build Time**: ${{ env.BUILD_TIME }} UTC
+          
+          **Components:**
+          - ✅ **KernelSU-Next**: Latest with SUSFS integration
+          - ✅ **SUSFS**: Root hiding capabilities  
+          - ✅ **AnyKernel3**: Universal flashing support
+          
+          **Installation:**
+          1. Download the ZIP file below
+          2. Boot into custom recovery (TWRP/OrangeFox)
+          3. Flash the ZIP file
+          4. Reboot and enjoy!
+          
+          **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.
+        files: |
+          workarea/${{ env.KERNEL_NAME }}.zip
+        draft: false
+        prerelease: false
 
     - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
