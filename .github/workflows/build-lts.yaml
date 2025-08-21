@@ -2,6 +2,16 @@ name: Build KernelSU-Next with SUSFS and AnyKernel3
 
 on:
   workflow_dispatch:
+    inputs:
+      kernel_type:
+        description: 'Kernel type to build'
+        required: true
+        default: 'gki'
+        type: choice
+        options:
+        - gki
+        - lts
+
 env:
   DEBIAN_FRONTEND: noninteractive
 
@@ -42,13 +52,17 @@ jobs:
         mkdir -p workarea
         cd workarea
         
+        # Determine kernel type (default to gki for scheduled runs)
+        KERNEL_TYPE="${{ inputs.kernel_type || 'gki' }}"
+        
         # Generate build timestamp
         BUILD_DATE=$(date +"%Y%m%d")
         BUILD_TIME=$(date +"%H%M")
-        KERNEL_NAME="kyernel-${BUILD_DATE}-${BUILD_TIME}"
+        KERNEL_NAME="kyernel-${KERNEL_TYPE}-${BUILD_DATE}-${BUILD_TIME}"
         
         echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
         echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
+        echo "KERNEL_TYPE=${KERNEL_TYPE}" >> $GITHUB_ENV
         echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
         
         echo "Building: $KERNEL_NAME"
@@ -57,9 +71,13 @@ jobs:
       run: |
         cd workarea
         
-        # Clone SUSFS repository
-        echo "Cloning SUSFS repository..."
-        git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
+        # Clone SUSFS repository based on kernel type
+        echo "Cloning SUSFS repository for $KERNEL_TYPE..."
+        if [[ "$KERNEL_TYPE" == "lts" ]]; then
+          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
+        else
+          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
+        fi
         
         # Clone AnyKernel3
         echo "Cloning AnyKernel3..."
@@ -71,8 +89,9 @@ jobs:
         mkdir -p gki-kernel android-kernel
         cd gki-kernel
         
+        echo "Setting up GKI Monthly sources first..."
         echo "Finding latest stable android14-6.1 tag..."
-        LATEST_TAG=$(git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep "refs/tags/android14-6.1-" | grep -v "\^{}" | sort -V | tail -1 | cut -d'/' -f3)
+        LATEST_TAG=$(git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep "refs/tags/android14-6.1-" | grep -v "lts" | grep -v "\^{}" | sort -V | tail -1 | cut -d'/' -f3)
         
         if [[ -n "$LATEST_TAG" ]]; then
           echo "Using latest stable tag: $LATEST_TAG"
@@ -84,65 +103,107 @@ jobs:
         
         echo "Starting repo sync..."
         repo sync -c --no-tags -j$(nproc)
-        echo "Repo sync completed"
+        echo "GKI Monthly setup completed"
+
+    - name: Setup LTS kernel (if LTS build)
+      if: env.KERNEL_TYPE == 'lts'
+      run: |
+        cd workarea
         
-        # Verify kernel sources
-        if [[ -d "common" ]]; then
-          echo "✅ Kernel sources ready"
-          cd common
-          echo "Kernel version: $(make kernelversion 2>/dev/null || echo 'Unknown')"
-          cd ..
+        # Create LTS kernel directory following the tutorial
+        mkdir -p gki-lts-kernel
+        cd gki-lts-kernel
+        git clone --depth 2 --no-tags https://android.googlesource.com/kernel/common.git -b android14-6.1-lts
+        
+        # Copy necessary components from GKI Monthly as per tutorial
+        cd ..
+        for i in build tools prebuilts external .repo kernel common-modules; do 
+          rsync -a --del gki-kernel/$i/ gki-lts-kernel/$i/ 2>/dev/null || true
+        done
+        
+        cd gki-lts-kernel
+        ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+        
+        echo "✅ LTS kernel sources ready"
+
+    - name: Create working directory
+      run: |
+        cd workarea
+        
+        if [[ "$KERNEL_TYPE" == "lts" ]]; then
+          # Create working mirror for LTS as per tutorial
+          rsync -a --del gki-lts-kernel/ gki-14-lts/
+          WORK_DIR="gki-14-lts"
         else
-          echo "❌ Kernel sources not found"
-          exit 1
+          # Create working mirror for GKI as per tutorial  
+          rsync -a --del gki-kernel/ gki-14/
+          WORK_DIR="gki-14"
         fi
+        
+        echo "WORK_DIR=${WORK_DIR}" >> $GITHUB_ENV
+        echo "Working in: $WORK_DIR"
+        rm -rf android-kernel/*
 
     - name: Copy SUSFS module and patches
       run: |
-        cd workarea/gki-kernel
+        cd workarea/$WORK_DIR
         
         echo "Copying SUSFS files..."
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
         cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        
+        if [[ "$KERNEL_TYPE" == "lts" ]]; then
+          # Try LTS-specific patch first, fallback to regular patch
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        else
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        fi
+        
         cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
 
     - name: Apply SUSFS patches
       run: |
-        cd workarea/gki-kernel/common
+        cd workarea/$WORK_DIR/common
         
         echo "Applying SUSFS patches..."
-        patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
+        # Apply LTS patch if it exists, otherwise use regular patch
+        if [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]]; then
+          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch
+        else
+          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
+        fi
+        
         patch -p1 -ui 60_scope-minimized_manual_hooks.patch
 
     - name: Setup KernelSU-Next with curl
       run: |
-        cd workarea/gki-kernel
+        cd workarea/$WORK_DIR
         
         echo "Setting up KernelSU-Next..."
         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
     - name: Remove protected exports
       run: |
-        cd workarea/gki-kernel
+        cd workarea/$WORK_DIR
         
         echo "Removing protected exports for Wi-Fi/Bluetooth compatibility..."
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm -f common/android/abi_gki_protected_exports_*
         
         # Clean up patch files
-        rm -f common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
+        rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
 
     - name: Commit changes
       run: |
-        cd workarea/gki-kernel/common
+        cd workarea/$WORK_DIR/common
         
         git add -A
         git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
 
     - name: Build kernel
       run: |
-        cd workarea/gki-kernel
+        cd workarea/$WORK_DIR
         
         echo "Building kernel with fast configuration..."
         tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
