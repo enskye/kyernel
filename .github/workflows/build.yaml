@@ -139,7 +139,7 @@ jobs:
     - name: Set Custom Kernel Version
       working-directory: ./gki-kernel
       run: |
-        echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
+        # echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
 
     - name: Build the Kernel
       working-directory: ./gki-kernel
@@ -183,7 +183,7 @@ jobs:
 
         # Enter AnyKernel3 directory, update properties, and create the zip
         cd AnyKernel3
-        BUILD_TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        BUILD_TIMESTAMP=$(date +%Y%m%d-%H%M)
         sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-${BUILD_TIMESTAMP} by enskye/" anykernel.sh
         
         # Use pigz for faster compression if available
@@ -197,7 +197,7 @@ jobs:
     - name: Set build date
       id: date
       run: |
-        BUILD_DATE=$(date +'%Y-%m-%d %H:%M:%S UTC')
+        BUILD_DATE=$(date +'%Y-%m-%d %H:%M UTC')
         echo "date=${BUILD_DATE}" >> $GITHUB_OUTPUT
         echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
         echo "Build date set to: ${BUILD_DATE}"
@@ -229,14 +229,8 @@ jobs:
           
           **Features:**
           - GKI Kernel with KernelSU-Next integration
-          - SUSFS support for advanced root management
-          - Optimized for Android 14
-          
-          **Installation:**
-          1. Boot to recovery (TWRP/OrangeFox)
-          2. Flash the attached zip file
-          3. Reboot to system
-          
+          - SUSFS support for advanced root hiding
+                    
           > ⚠️ **Warning**: This is an unofficial kernel build. Flash at your own risk.
         make_latest: true
         generate_release_notes: true
