@@ -81,7 +81,6 @@ jobs:
         path: |
           susfs4ksu
           kernel_patches
-          gki-kernel/.repo
         key: ${{ runner.os }}-source-repos-${{ github.run_id }}
         restore-keys: |
           ${{ runner.os }}-source-repos-
@@ -95,21 +94,18 @@ jobs:
 
     - name: Initialize and Sync GKI Repository
       run: |
-        if [ ! -d "gki-kernel/.repo" ]; then
-          mkdir -p gki-kernel
-          cd gki-kernel
-          repo init -u https://android.googlesource.com/kernel/manifest --depth=1
-          cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
-          repo init --depth=1 -m manifest_13884750.xml
-        else
-          cd gki-kernel
-        fi
+        mkdir -p gki-kernel
+        cd gki-kernel
         
-        git config --global user.email "you@example.com"
-        git config --global user.name "Your Name"
+        # Initialize with default manifest first
+        repo init -u https://android.googlesource.com/kernel/manifest --depth=1
         
-        # Use parallel jobs for faster sync
-        repo sync -j$(nproc) --current-branch --no-tags --optimized-fetch
+        # Copy custom manifest and reinitialize
+        cp ../kernel_patches/manifest_13884750.xml .repo/manifests/
+        repo init --depth=1 -m manifest_13884750.xml
+        
+        # Force sync with the custom manifest
+        repo sync -j$(nproc) --current-branch --no-tags --optimized-fetch --force-sync
 
     - name: Copy and Apply Patches
       working-directory: ./gki-kernel
@@ -143,7 +139,7 @@ jobs:
     - name: Set Custom Kernel Version
       working-directory: ./gki-kernel
       run: |
-        #echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
+        echo 'echo "-android14-11-ga4b2a2c52a04-ab13615798"' > common/scripts/setlocalversion
 
     - name: Build the Kernel
       working-directory: ./gki-kernel
@@ -156,7 +152,7 @@ jobs:
           --jobs=$(nproc) \
           --local_ram_resources=$(($(free -m | awk 'NR==2{print $2}') * 2 / 3)) \
           --local_cpu_resources=$(nproc) \
-          --incompatible_strict_action_env=false \
+          --verbose_failures \
           //common:kernel_aarch64_dist
         
         # Copy dist files
@@ -187,15 +183,15 @@ jobs:
 
         # Enter AnyKernel3 directory, update properties, and create the zip
         cd AnyKernel3
-        BUILD_DATE=$(date +%Y%m%d)
-        sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-${BUILD_DATE} by enskye/" anykernel.sh
+        BUILD_TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        sed -i "s/kernel.string=.*/kernel.string=kyernel-gki-${BUILD_TIMESTAMP} by enskye/" anykernel.sh
         
         # Use pigz for faster compression if available
         if command -v pigz >/dev/null 2>&1; then
           export PIGZ="-9"
-          zip -r "../release/kyernel-${BUILD_DATE}.zip" * -x .git README.md *placeholder
+          zip -r "../release/kyernel-${BUILD_TIMESTAMP}.zip" * -x .git README.md *placeholder
         else
-          zip -r9 "../release/kyernel-${BUILD_DATE}.zip" * -x .git README.md *placeholder
+          zip -r9 "../release/kyernel-${BUILD_TIMESTAMP}.zip" * -x .git README.md *placeholder
         fi
 
     - name: Set build date
@@ -233,7 +229,13 @@ jobs:
           
           **Features:**
           - GKI Kernel with KernelSU-Next integration
-          - SUSFS support for advanced root hiding
+          - SUSFS support for advanced root management
+          - Optimized for Android 14
+          
+          **Installation:**
+          1. Boot to recovery (TWRP/OrangeFox)
+          2. Flash the attached zip file
+          3. Reboot to system
           
           > ⚠️ **Warning**: This is an unofficial kernel build. Flash at your own risk.
         make_latest: true
