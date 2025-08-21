@@ -1,30 +1,7 @@
-name: Build KernelSU-Next with SUSFS
+name: Build KernelSU-Next with SUSFS and AnyKernel3
 
 on:
   workflow_dispatch:
-    inputs:
-      kernel_type:
-        description: 'Kernel type to build'
-        required: true
-        default: 'gki'
-        type: choice
-        options:
-        - gki
-        - lts
-      manifest_number:
-        description: 'Manifest number (optional - will use latest android14-6.1 if not available)'
-        required: false
-        type: string
-      build_config:
-        description: 'Build configuration'
-        required: false
-        default: 'fast'
-        type: choice
-        options:
-        - fast
-        - release
-        - debug
-
 env:
   DEBIAN_FRONTEND: noninteractive
 
@@ -46,7 +23,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev
+        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev lz4
         
         # Install repo
         mkdir -p ~/.bin
@@ -60,40 +37,48 @@ jobs:
         git config --global user.email "actions@github.com"
         git config --global init.defaultBranch main
 
-    - name: Create workspace
+    - name: Create workspace and get build info
       run: |
         mkdir -p workarea
         cd workarea
+        
+        # Generate build timestamp
+        BUILD_DATE=$(date +"%Y%m%d")
+        BUILD_TIME=$(date +"%H%M")
+        KERNEL_NAME="kyernel-${BUILD_DATE}-${BUILD_TIME}"
+        
+        echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+        echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
+        echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
+        
+        echo "Building: $KERNEL_NAME"
 
-    - name: Clone SUSFS repository
+    - name: Clone repositories
       run: |
         cd workarea
-        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
-          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
-        else
-          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
-        fi
+        
+        # Clone SUSFS repository
+        echo "Cloning SUSFS repository..."
+        git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
+        
+        # Clone AnyKernel3
+        echo "Cloning AnyKernel3..."
+        git clone --depth 1 https://github.com/enskye/AnyKernel3.git
 
-    - name: Setup kernel sources
+    - name: Setup kernel sources with latest stable tag
       run: |
         cd workarea
         mkdir -p gki-kernel android-kernel
         cd gki-kernel
         
-        echo "Initializing kernel manifest repository..."
+        echo "Finding latest stable android14-6.1 tag..."
+        LATEST_TAG=$(git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep "refs/tags/android14-6.1-" | grep -v "\^{}" | sort -V | tail -1 | cut -d'/' -f3)
         
-        # If a specific manifest number is provided, try to use it
-        if [[ -n "${{ inputs.manifest_number }}" ]]; then
-          echo "Checking for build-${{ inputs.manifest_number }} tag..."
-          if git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep -q "refs/tags/build-${{ inputs.manifest_number }}$"; then
-            echo "Found specific build tag, using build-${{ inputs.manifest_number }}"
-            repo init -u https://android.googlesource.com/kernel/manifest -b refs/tags/build-${{ inputs.manifest_number }} --depth=2
-          else
-            echo "Build tag not found, using latest android14-6.1 branch"
-            repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=2
-          fi
+        if [[ -n "$LATEST_TAG" ]]; then
+          echo "Using latest stable tag: $LATEST_TAG"
+          repo init -u https://android.googlesource.com/kernel/manifest -b $LATEST_TAG --depth=2
         else
-          echo "No manifest number provided, using latest android14-6.1 branch"
+          echo "No stable tag found, using common-android14-6.1 branch"
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=2
         fi
         
@@ -101,123 +86,172 @@ jobs:
         repo sync -c --no-tags -j$(nproc)
         echo "Repo sync completed"
         
-        # Verify we have the kernel sources
-        echo "Checking kernel sources:"
-        ls -la
+        # Verify kernel sources
         if [[ -d "common" ]]; then
-          echo "✅ Common kernel directory found"
+          echo "✅ Kernel sources ready"
           cd common
-          echo "Kernel version info:"
-          make kernelversion 2>/dev/null || echo "Could not determine kernel version"
+          echo "Kernel version: $(make kernelversion 2>/dev/null || echo 'Unknown')"
           cd ..
         else
-          echo "❌ Common kernel directory not found"
+          echo "❌ Kernel sources not found"
+          exit 1
         fi
-
-    - name: Setup LTS kernel (if LTS build)
-      if: inputs.kernel_type == 'lts'
-      run: |
-        cd workarea/gki-kernel
-        # For LTS, clone the LTS branch directly into common directory
-        rm -rf common
-        git clone --depth 2 --no-tags https://android.googlesource.com/kernel/common.git -b android14-6.1-lts common
-        ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
 
     - name: Copy SUSFS module and patches
       run: |
         cd workarea/gki-kernel
         
-        # Copy SUSFS files
+        echo "Copying SUSFS files..."
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
         cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-        
-        if [[ "${{ inputs.kernel_type }}" == "lts" ]]; then
-          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
-          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-        else
-          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-        fi
-        
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
         cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
 
-    - name: Apply patches
+    - name: Apply SUSFS patches
       run: |
         cd workarea/gki-kernel/common
         
-        # Apply SUSFS patches
-        if [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]]; then
-          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch
-        else
-          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
-        fi
-        
+        echo "Applying SUSFS patches..."
+        patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 -ui 60_scope-minimized_manual_hooks.patch
 
-    - name: Setup KernelSU-Next
+    - name: Setup KernelSU-Next with curl
       run: |
         cd workarea/gki-kernel
         
-        # Pull down KernelSU-Next and execute setup
+        echo "Setting up KernelSU-Next..."
         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+
+    - name: Verify KernelSU integration
+      run: |
+        cd workarea/gki-kernel/common
+        
+        echo "=== KernelSU Integration Status ==="
+        if [ -d "KernelSU" ]; then
+          echo "✅ KernelSU directory found"
+          cd KernelSU
+          echo "Last 3 commits:"
+          git log --oneline -3 || echo "No git history"
+          
+          echo -e "\nVersion information:"
+          find . -name "*version*" -type f | head -5
+          grep -r "DRIVER_VERSION\|KERNELSU_VERSION" . | head -3 || echo "Version defines not found"
+          cd ..
+        else
+          echo "❌ KernelSU not found!"
+          exit 1
+        fi
 
     - name: Remove protected exports
       run: |
         cd workarea/gki-kernel
         
-        # Remove protected exports for Wi-Fi and Bluetooth functionality
+        echo "Removing protected exports for Wi-Fi/Bluetooth compatibility..."
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
-        rm -f common/android/abi_gki_protected_exports_* common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
+        rm -f common/android/abi_gki_protected_exports_*
+        
+        # Clean up patch files
+        rm -f common/50_add_susfs_in_gki-android14-6.1.patch common/60_scope-minimized_manual_hooks.patch
 
     - name: Commit changes
       run: |
         cd workarea/gki-kernel/common
         
         git add -A
-        git commit -a -m "Add KernelSU-Next-susfs with SUSFS integration"
+        git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
 
     - name: Build kernel
       run: |
         cd workarea/gki-kernel
         
-        # Build the kernel
-        tools/bazel run --config=${{ inputs.build_config }} --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        echo "Building kernel with fast configuration..."
+        tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
-    - name: Prepare boot image components
+    - name: Prepare kernel image for AnyKernel3
       run: |
         cd workarea/android-kernel
-        mkdir -p kernel
         
-        # List built artifacts
-        echo "Built kernel artifacts:"
+        echo "Built artifacts:"
         ls -la
         
-        # Copy kernel image if it exists
+        # Find and prepare kernel image
         if [[ -f "Image" ]]; then
-          cp Image kernel/
+          echo "Compressing Image to Image.lz4..."
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
         elif [[ -f "Image.gz" ]]; then
-          cp Image.gz kernel/
+          echo "Converting Image.gz to Image.lz4..."
+          gunzip Image.gz
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        else
+          echo "❌ No kernel image found!"
+          exit 1
         fi
+        
+        echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
+        echo "✅ Kernel image prepared: $KERNEL_IMAGE"
 
-    - name: Upload kernel artifacts
+    - name: Create AnyKernel3 package
+      run: |
+        cd workarea
+        
+        echo "Preparing AnyKernel3 package..."
+        cd AnyKernel3
+        
+        # Copy kernel image
+        cp ../android-kernel/$KERNEL_IMAGE .
+        
+        # Update AnyKernel3 script if needed
+        echo "Kernel image: $KERNEL_IMAGE"
+        echo "Package contents:"
+        ls -la
+        
+        # Create ZIP package
+        ZIP_NAME="${KERNEL_NAME}.zip"
+        zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" "LICENSE"
+        
+        cd ..
+        echo "✅ Created: $ZIP_NAME"
+        echo "Package size: $(du -h $ZIP_NAME | cut -f1)"
+
+    - name: Upload AnyKernel3 package
       uses: actions/upload-artifact@v4
       with:
-        name: kernelsu-susfs-${{ inputs.kernel_type }}-kernel-${{ inputs.manifest_number || 'latest' }}
-        path: |
-          workarea/android-kernel/
+        name: ${{ env.KERNEL_NAME }}
+        path: workarea/${{ env.KERNEL_NAME }}.zip
         retention-days: 30
+
+    - name: Upload raw kernel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.KERNEL_NAME }}-raw-files
+        path: workarea/android-kernel/
+        retention-days: 15
 
     - name: Generate build summary
       run: |
-        echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Kernel Type**: ${{ inputs.kernel_type }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Manifest**: ${{ inputs.manifest_number || 'Latest android14-6.1' }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Config**: ${{ inputs.build_config }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Status**: ✅ Success" >> $GITHUB_STEP_SUMMARY
+        cd workarea
+        
+        echo "## 🚀 KernelSU Build Complete" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Artifacts Built:" >> $GITHUB_STEP_SUMMARY
-        cd workarea/android-kernel
+        echo "### 📦 Package Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Name**: \`$KERNEL_NAME\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Date**: $BUILD_DATE" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Time**: $BUILD_TIME UTC" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package**: \`$KERNEL_NAME.zip\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: $(du -h $KERNEL_NAME.zip | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔧 Build Components" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **KernelSU-Next**: Latest with SUSFS integration" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **SUSFS**: Root hiding capabilities" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **AnyKernel3**: Universal flashing support" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📋 Raw Artifacts" >> $GITHUB_STEP_SUMMARY
+        cd android-kernel
         for file in *; do
           if [[ -f "$file" ]]; then
-            echo "- $file ($(stat -c%s "$file" | numfmt --to=iec-i))" >> $GITHUB_STEP_SUMMARY
+            echo "- \`$file\` ($(stat -c%s "$file" | numfmt --to=iec-i))" >> $GITHUB_STEP_SUMMARY
           fi
         done
