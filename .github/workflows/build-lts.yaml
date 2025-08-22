@@ -55,11 +55,15 @@ jobs:
         # Generate build timestamp
         BUILD_DATE=$(date +"%Y%m%d")
         BUILD_TIME=$(date +"%H%M")
+        BUILD_DATE_FORMATTED=$(date +"%Y-%m-%d")
+        BUILD_TIME_FORMATTED=$(date +"%H:%M")
         KERNEL_TYPE="${{ inputs.kernel_type }}"
         KERNEL_NAME="kyernel-${KERNEL_TYPE}-${BUILD_DATE}-${BUILD_TIME}"
         
         echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
         echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
+        echo "BUILD_DATE_FORMATTED=${BUILD_DATE_FORMATTED}" >> $GITHUB_ENV
+        echo "BUILD_TIME_FORMATTED=${BUILD_TIME_FORMATTED}" >> $GITHUB_ENV
         echo "KERNEL_TYPE=${KERNEL_TYPE}" >> $GITHUB_ENV
         echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
         
@@ -191,11 +195,6 @@ jobs:
         
         # Clean up patch files
         rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
-        
-    - name: Set Custom Kernel Version
-      run: |
-        cd workarea/$WORK_DIR
-        echo 'echo "-kyernel"' > common/scripts/setlocalversion
 
     - name: Commit changes
       run: |
@@ -265,12 +264,12 @@ jobs:
         tag_name: ${{ env.KERNEL_NAME }}
         name: ${{ env.KERNEL_NAME }}
         body: |
-          ## 🚀 KernelSU Build - ${{ env.KERNEL_NAME }}
+          ## 🚀 GKI2 Build - ${{ env.KERNEL_NAME }}
           
           **Build Information:**
           - **Kernel Type**: ${{ env.KERNEL_TYPE }}
-          - **Build Date**: ${{ env.BUILD_DATE }}
-          - **Build Time**: ${{ env.BUILD_TIME }} UTC
+          - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
+          - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
           
           **Components:**
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
@@ -300,12 +299,12 @@ jobs:
       run: |
         cd workarea
         
-        echo "## 🚀 KernelSU Build Complete" >> $GITHUB_STEP_SUMMARY
+        echo "## 🚀 GKI2 Build Complete" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Package Information" >> $GITHUB_STEP_SUMMARY
         echo "- **Name**: \`$KERNEL_NAME\`" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Date**: $BUILD_DATE" >> $GITHUB_STEP_SUMMARY
-        echo "- **Build Time**: $BUILD_TIME UTC" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Date**: $BUILD_DATE_FORMATTED" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Time**: $BUILD_TIME_FORMATTED UTC" >> $GITHUB_STEP_SUMMARY
         echo "- **Package**: \`$KERNEL_NAME.zip\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Size**: $(du -h $KERNEL_NAME.zip | cut -f1)" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
