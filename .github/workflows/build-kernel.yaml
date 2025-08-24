@@ -17,5 +17,16 @@ jobs:
       - name: Install Dependencies & Setup Repo Tool
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses-dev lib32readline
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses-dev libsdl2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+          
+          # Download the repo tool
+          mkdir -p ~/.bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+x ~/.bin/repo
+          
+          # Add the repo tool to the PATH for all subsequent steps
+          echo "$HOME/.bin" >> $GITHUB_PATH
+          
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com
           
