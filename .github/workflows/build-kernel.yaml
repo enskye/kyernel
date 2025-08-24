@@ -1,14 +1,9 @@
 # .github/workflows/build-kernel.yml
 
-name: Build GKI Kernel with KernelSU & susfs
+name: Build GKI Kernel with KernelSU & susfs4ksu
 
 on:
-  workflow_dispatch:
-    inputs:
-      susfs_ref:
-        description: 'susfs tag, commit, or branch to use'
-        required: true
-        default: 'main'
+  workflow_dispatch: # Allows you to run this workflow manually
 
 jobs:
   build:
@@ -34,45 +29,26 @@ jobs:
           repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
           echo "KERNEL_REPO=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
 
-      - name: Integrate KernelSU (via setup.sh)
+      - name: Integrate KernelSU
         working-directory: ${{ env.KERNEL_REPO }}
         run: |
-          # Use the official setup script as requested
+          # Use the official setup script
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           echo "✅ KernelSU integrated successfully."
 
-      - name: Integrate susfs (Developer Patch Method)
+      - name: Integrate susfs4ksu
+        working-directory: ${{ env.KERNEL_REPO }}/common
         run: |
-          echo "Cloning susfs branch/tag: ${{ inputs.susfs_ref }}"
-          git clone https://gitlab.com/Simon-P/susfs.git --depth=1 --branch ${{ inputs.susfs_ref }} /tmp/susfs
-
-          echo "Copying susfs source and patch files..."
-          # 1. Copy patch files
-          cp /tmp/susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch $KERNEL_REPO/KernelSU/
-          cp /tmp/susfs/kernel_patches/50_add_susfs_in_kernel-6.1.patch $KERNEL_REPO/common/
+          # Clone the specified branch of the susfs4ksu repo
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 --branch gki-android14-6.1 /tmp/susfs4ksu
           
-          # 2. Copy source files
-          cp -r /tmp/susfs/kernel_patches/fs/* $KERNEL_REPO/common/fs/
-          cp -r /tmp/susfs/kernel_patches/include/linux/* $KERNEL_REPO/common/include/linux/
-
-          echo "Applying patches..."
-          # 3. Apply KernelSU patch
-          cd $KERNEL_REPO/KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
-          
-          # 4. Apply common kernel patch
-          cd $KERNEL_REPO/common && patch -p1 < 50_add_susfs_in_kernel-6.1.patch
-          echo "✅ susfs integrated successfully."
-
-      - name: Configure Build
-        run: |
-          BUILD_CONFIG_PATH="$KERNEL_REPO/common/build.config.gki.aarch64"
-          echo "CONFIG_KSU=y" >> $BUILD_CONFIG_PATH
-          echo "CONFIG_KSU_SUSFS=y" >> $BUILD_CONFIG_PATH
-          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $BUILD_CONFIG_PATH
-          echo "✅ Build configured with KernelSU and susfs."
+          # Apply the patch from the cloned repo
+          git apply /tmp/susfs4ksu/patches/android14-6.1/*.patch
+          echo "✅ susfs4ksu integrated successfully."
 
       - name: Apply GKI Android 14+ Fixes
         run: |
+          # Remove ABI symbol list files that can cause module loading issues
           rm -f $KERNEL_REPO/common/android/abi_gki_protected_exports_aarch64
           rm -f $KERNEL_REPO/common/android/abi_gki_protected_exports_x86_64
           echo "✅ GKI ABI files removed."
@@ -81,6 +57,7 @@ jobs:
         id: build
         working-directory: ${{ env.KERNEL_REPO }}
         run: |
+          # Start the build. The integration scripts handle the config.
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
           echo "✅ Kernel build completed."
           echo "Contents of dist directory:"
@@ -92,4 +69,3 @@ jobs:
           name: kernel-artifacts
           path: ${{ env.KERNEL_REPO }}/out/dist/
           if-no-files-found: error
-          
