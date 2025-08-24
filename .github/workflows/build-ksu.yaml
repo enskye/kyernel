@@ -74,15 +74,21 @@ jobs:
         CONFIG_SUSFS_TRY_UMOUNT=y
         EOF
         
-        # Create custom build config that includes our fragment
-        cp build.config.gki.aarch64 build.config.gki.aarch64.ksu
-        echo "" >> build.config.gki.aarch64.ksu
-        echo "FRAGMENT_CONFIG=gki_ksu_susfs.fragment" >> build.config.gki.aarch64.ksu
+        # Create build config for GKI with KernelSU and SUSFS4KSU
+        cat > build.config.gki.aarch64.ksu << 'EOF'
+        ARCH=arm64
+        BRANCH=android14-6.1-lts
+        CLANG_TRIPLE=aarch64-linux-gnu-
+        CROSS_COMPILE=aarch64-linux-android-
+        DEFCONFIG=gki_defconfig
+        KERNEL_DIR=common
+        FRAGMENT_CONFIG=gki_ksu_susfs.fragment
+        EOF
         
     - name: Build with Bazel
       run: |
         cd build
-        bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+        BUILD_CONFIG=build.config.gki.aarch64.ksu bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
         
     - name: Prepare artifacts
       run: |
