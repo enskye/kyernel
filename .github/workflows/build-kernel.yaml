@@ -28,7 +28,8 @@ jobs:
       - name: Initialize & Sync GKI Kernel Source
         run: |
           mkdir kernel && cd kernel
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
+          # UPDATED: Using the 2025-06 monthly build manifest branch
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-2025-06 --depth=1
           repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
           echo "KERNEL_REPO=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
 
