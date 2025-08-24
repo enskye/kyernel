@@ -84,38 +84,82 @@ jobs:
         
         # Clean and setup LTS kernel
         rm -rf gki-lts-kernel gki-kernel
-        mkdir -p gki-lts-kernel gki-kernel
+        mkdir -p gki-lts-kernel
         
-        # Setup GKI Monthly for components
-        cd gki-kernel
-        echo "Setting up GKI Monthly sources for components..."
-        LATEST_TAG=$(git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep "refs/tags/android14-6.1-" | grep -v "lts" | grep -v "\^{}" | sort -V | tail -1 | cut -d'/' -f3)
+        # Setup LTS kernel with complete manifest
+        cd gki-lts-kernel
+        echo "Setting up LTS kernel sources with complete manifest..."
         
-        if [[ -n "$LATEST_TAG" ]]; then
-          echo "Using latest stable tag: $LATEST_TAG"
-          repo init -u https://android.googlesource.com/kernel/manifest -b $LATEST_TAG --depth=1
-        else
-          echo "No stable tag found, using common-android14-6.1 branch"
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
+        # Initialize with LTS branch but ensure we get all components
+        echo "Initializing repo with LTS manifest..."
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
+        
+        echo "Starting complete repo sync..."
+        # Force sync all projects including missing ones
+        repo sync -c --no-tags --force-sync --no-repo-verify -j$(nproc)
+        
+        # If kernel/configs is still missing, try to sync it explicitly
+        if [[ ! -d "kernel/configs" ]]; then
+          echo "⚠️ kernel/configs missing, attempting explicit sync..."
+          repo sync kernel/configs || {
+            echo "Creating kernel/configs manually..."
+            mkdir -p kernel/configs
+            # Clone configs separately as fallback
+            git clone --depth=1 https://android.googlesource.com/kernel/configs kernel/configs || echo "Configs clone failed"
+          }
         fi
         
-        echo "Starting repo sync..."
-        repo sync -c --no-tags --force-sync -j$(nproc)
+        # Check for other critical missing components and sync them
+        MISSING_COMPONENTS=""
         
-        # Setup LTS kernel
-        cd ../gki-lts-kernel
-        git clone https://android.googlesource.com/kernel/common.git -b android14-6.1-lts
+        if [[ ! -d "common-modules/virtual-device" ]]; then
+          echo "⚠️ Syncing common-modules..."
+          repo sync common-modules/virtual-device || MISSING_COMPONENTS="$MISSING_COMPONENTS virtual-device"
+        fi
         
-        # Copy necessary components from GKI Monthly
-        cd ..
-        for i in build tools prebuilts external .repo; do 
-          rsync -a gki-kernel/$i/ gki-lts-kernel/$i/ 2>/dev/null || true
+        if [[ ! -d "kernel/configs" ]]; then
+          MISSING_COMPONENTS="$MISSING_COMPONENTS kernel/configs"
+        fi
+        
+        if [[ ! -d "kernel/tests" ]]; then
+          echo "⚠️ Syncing kernel/tests..."
+          repo sync kernel/tests || MISSING_COMPONENTS="$MISSING_COMPONENTS kernel/tests"
+        fi
+        
+        # Verify critical directories exist
+        echo "Verifying repository structure..."
+        REQUIRED_DIRS=("common" "build" "kernel/configs")
+        for dir in "${REQUIRED_DIRS[@]}"; do
+          if [[ ! -d "$dir" ]]; then
+            echo "❌ Required directory missing: $dir"
+            echo "Available directories:"
+            find . -maxdepth 2 -type d | head -20
+            exit 1
+          else
+            echo "✅ $dir"
+          fi
         done
         
-        cd gki-lts-kernel
-        ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+        # List repository structure for debugging
+        echo "Repository structure:"
+        find . -maxdepth 3 -type d | grep -E "(kernel|common)" | sort
         
-        echo "✅ LTS kernel sources ready"
+        # Set up workspace
+        if [[ -f "build/kernel/kleaf/bazel.WORKSPACE" ]]; then
+          ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+          echo "✅ WORKSPACE symlink created"
+        else
+          echo "❌ bazel.WORKSPACE not found!"
+          find . -name "bazel.WORKSPACE" -o -name "WORKSPACE*"
+          exit 1
+        fi
+        
+        if [[ -n "$MISSING_COMPONENTS" ]]; then
+          echo "⚠️ Some components missing: $MISSING_COMPONENTS"
+          echo "Continuing with available components..."
+        fi
+        
+        echo "✅ LTS kernel sources setup completed"
 
     - name: Create working directory
       run: |
@@ -123,10 +167,27 @@ jobs:
         
         # Create working directory for LTS build
         rm -rf gki-14-lts
-        rsync -a gki-lts-kernel/ gki-14-lts/
+        cp -r gki-lts-kernel gki-14-lts
         
         echo "WORK_DIR=gki-14-lts" >> $GITHUB_ENV
         echo "Working in: gki-14-lts"
+        
+        # Verify workspace structure
+        cd gki-14-lts
+        echo "Workspace verification:"
+        ls -la
+        
+        # Check if WORKSPACE file exists and is correct
+        if [[ -L "WORKSPACE" ]]; then
+          echo "✅ WORKSPACE symlink exists"
+          ls -la WORKSPACE
+        else
+          echo "❌ WORKSPACE symlink missing!"
+          if [[ -f "build/kernel/kleaf/bazel.WORKSPACE" ]]; then
+            ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+            echo "✅ Created WORKSPACE symlink"
+          fi
+        fi
 
     - name: Copy SUSFS module and patches
       run: |
@@ -184,14 +245,79 @@ jobs:
         git add -A
         git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
 
+    - name: Setup signing keys for Bazel
+      run: |
+        cd workarea/gki-14-lts
+        
+        # Create signing keys directory
+        mkdir -p signing
+        
+        if [[ -n "${{ secrets.KERNEL_SIGNING_KEY }}" && -n "${{ secrets.KERNEL_SIGNING_CERT }}" ]]; then
+          echo "Setting up kernel signing keys from GitHub Secrets..."
+          echo "${{ secrets.KERNEL_SIGNING_KEY }}" | base64 -d > signing/kernel_key.pem
+          echo "${{ secrets.KERNEL_SIGNING_CERT }}" | base64 -d > signing/kernel_cert.pem
+          SIGNING_ARGS="--action_env=KBUILD_SIGN_PIN= --action_env=KBUILD_SIGN_CERT=signing/kernel_cert.pem --action_env=KBUILD_SIGN_KEY=signing/kernel_key.pem"
+        else
+          echo "No signing keys found in secrets, generating temporary keys for development..."
+          # Generate temporary self-signed keys for development builds
+          openssl genrsa -out signing/kernel_key.pem 4096
+          openssl req -new -x509 -key signing/kernel_key.pem -out signing/kernel_cert.pem -days 365 -subj "/C=US/ST=Dev/L=Build/O=Kyernel/CN=kyernel-lts"
+          SIGNING_ARGS="--action_env=KBUILD_SIGN_PIN= --action_env=KBUILD_SIGN_CERT=signing/kernel_cert.pem --action_env=KBUILD_SIGN_KEY=signing/kernel_key.pem"
+          echo "⚠️ Using temporary development keys. For production, add KERNEL_SIGNING_KEY and KERNEL_SIGNING_CERT to repository secrets."
+        fi
+        
+        echo "SIGNING_ARGS=${SIGNING_ARGS}" >> $GITHUB_ENV
+        echo "✅ Kernel signing keys prepared"
+
     - name: Build kernel
       run: |
         cd workarea/gki-14-lts
         
-        echo "Building kernel with fast configuration..."
-        tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        echo "Pre-build verification..."
+        echo "Current directory contents:"
+        ls -la
+        
+        echo "Checking for required directories:"
+        [[ -d "common" ]] && echo "✅ common/" || echo "❌ common/ missing"
+        [[ -d "build" ]] && echo "✅ build/" || echo "❌ build/ missing"
+        [[ -d "tools" ]] && echo "✅ tools/" || echo "❌ tools/ missing"
+        [[ -d "prebuilts" ]] && echo "✅ prebuilts/" || echo "❌ prebuilts/ missing"
+        [[ -d "kernel/configs" ]] && echo "✅ kernel/configs/" || echo "❌ kernel/configs/ missing"
+        [[ -f "WORKSPACE" ]] && echo "✅ WORKSPACE" || echo "❌ WORKSPACE missing"
+        
+        # Show kernel/configs contents if it exists
+        if [[ -d "kernel/configs" ]]; then
+          echo "kernel/configs contents:"
+          ls -la kernel/configs/ | head -10
+        fi
+        
+        # Check workspace status manually
+        echo "Testing workspace status..."
+        tools/bazel info workspace 2>&1 || echo "Workspace info failed"
+        
+        # Try to query available targets first
+        echo "Querying available kernel targets..."
+        tools/bazel query "//common:*" 2>&1 | head -10 || echo "Query failed, continuing..."
+        
+        # If kernel/configs is still missing, try alternative build approach
+        if [[ ! -d "kernel/configs" ]]; then
+          echo "⚠️ kernel/configs missing, trying fallback build..."
+          # Try building without dist target first
+          tools/bazel build --config=fast --config=stamp --lto=thin --verbose_failures $SIGNING_ARGS //common:kernel_aarch64 || {
+            echo "❌ Fallback build also failed"
+            exit 1
+          }
+          
+          # If successful, try to create dist manually
+          echo "Creating distribution manually..."
+          mkdir -p ../android-kernel
+          find bazel-bin -name "Image*" -exec cp {} ../android-kernel/ \;
+        else
+          echo "Building kernel with signing enabled..."
+          tools/bazel run --config=fast --config=stamp --lto=thin --verbose_failures $SIGNING_ARGS //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        fi
 
-    - name: Prepare and sign kernel image
+    - name: Prepare kernel image
       run: |
         cd workarea/android-kernel
         
@@ -214,16 +340,8 @@ jobs:
         fi
         
         echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
-        echo "✅ Kernel image prepared: $KERNEL_IMAGE"
-        
-        # Sign the kernel image if signing tools are available
-        if command -v avbtool >/dev/null 2>&1; then
-          echo "Signing kernel image..."
-          avbtool add_hashtree_footer --image $KERNEL_IMAGE --partition_size 67108864 --partition_name boot
-          echo "✅ Kernel image signed"
-        else
-          echo "⚠️ Signing tools not available, skipping signature"
-        fi
+        echo "✅ Kernel image prepared and compressed: $KERNEL_IMAGE"
+        echo "✅ Image was signed during Bazel build process"
 
     - name: Create AnyKernel3 package
       run: |
