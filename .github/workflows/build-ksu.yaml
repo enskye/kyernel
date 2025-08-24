@@ -1,214 +1,107 @@
-name: Build Android GKI Kernel with KernelSU and SUSFS4KSU
+name: Android Kernel Build (Official Method)
 
 on:
   push:
-    branches: [ main, master ]
   pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
       
-    - name: Set up build environment
+    - name: Install dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential \
-          bc \
-          bison \
-          flex \
-          libssl-dev \
-          libelf-dev \
-          git \
-          wget \
-          curl \
-          zip \
-          unzip \
-          python3 \
-          python3-pip
-          
-    - name: Set up Python dependencies
+        sudo apt update
+        sudo apt install -y git wget curl build-essential bc flex bison libssl-dev libelf-dev python3 zip repo
+        
+    - name: Setup repo and sync sources
       run: |
-        pip3 install --user argparse
+        mkdir android-kernel && cd android-kernel
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts
+        repo sync
         
-    - name: Download and setup toolchain
+    - name: Setup KernelSU
       run: |
-        mkdir -p ~/toolchain
-        cd ~/toolchain
-        
-        # Download Clang toolchain
-        wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
-        mkdir clang-r487747c
-        tar -xzf clang-r487747c.tar.gz -C clang-r487747c
-        
-        # Download GCC toolchain for aarch64
-        wget https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/heads/main.tar.gz -O gcc-aarch64.tar.gz
-        mkdir gcc-aarch64
-        tar -xzf gcc-aarch64.tar.gz -C gcc-aarch64
-        
-        # Download build tools
-        wget https://android.googlesource.com/kernel/build-tools/+archive/refs/heads/main.tar.gz -O build-tools.tar.gz
-        mkdir build-tools
-        tar -xzf build-tools.tar.gz -C build-tools
-        
-    - name: Clone kernel source
-      run: |
-        cd ~/
-        git clone --depth=1 --branch android-mainline https://android.googlesource.com/kernel/common kernel
-        cd kernel
-        git checkout android12-5.10-lts || git checkout android13-5.15-lts || git checkout origin/common-android-mainline
-        
-        # Switch to 6.1 LTS branch if available
-        git fetch --all --tags
-        git checkout android14-6.1 || echo "6.1 branch not found, using available branch"
-        
-    - name: Clone KernelSU
-      run: |
-        cd ~/kernel
+        cd android-kernel/common
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         
-    - name: Clone SUSFS4KSU
+    - name: Setup SUSFS4KSU
       run: |
-        cd ~/kernel
-        git submodule add https://github.com/simonpunk/susfs4ksu.git KernelSU/userspace/susfs4ksu
+        cd android-kernel/common
+        mkdir -p KernelSU/userspace
+        git clone -b gki-android14-6.1 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git KernelSU/userspace/susfs4ksu
         
-    - name: Apply KernelSU patches
+    - name: Apply patches
       run: |
-        cd ~/kernel
+        cd android-kernel/common
         
-        # Apply KernelSU patches
-        if [ -d "KernelSU" ]; then
-          echo "Applying KernelSU patches..."
-          
-          # Add KernelSU to Kconfig
-          if ! grep -q "source \"KernelSU/Kconfig\"" "drivers/Kconfig"; then
-            echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
-          fi
-          
-          # Add KernelSU to Makefile
-          if ! grep -q "obj-\$(CONFIG_KSU) += KernelSU/" "drivers/Makefile"; then
-            echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
-          fi
+        # KernelSU integration
+        echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
+        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
+        
+        # Try SUSFS patch
+        if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch" ]; then
+          patch -p1 < KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch || echo "Patch failed, continuing..."
         fi
         
-    - name: Apply SUSFS4KSU patches
+    - name: Configure kernel for KernelSU and SUSFS4KSU
       run: |
-        cd ~/kernel
+        cd android-kernel
         
-        if [ -d "KernelSU/userspace/susfs4ksu" ]; then
-          echo "Applying SUSFS4KSU patches..."
-          
-          # Copy SUSFS patches if they exist
-          if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch" ]; then
-            patch -p1 < KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch || echo "Patch failed, continuing..."
-          fi
-          
-          # Manual integration if patch fails
-          if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/fs/sus_su.c" ]; then
-            mkdir -p fs/susfs
-            cp -r KernelSU/userspace/susfs4ksu/kernel_patches/fs/* fs/
-          fi
-        fi
+        # Create config fragment with all SUSFS4KSU options
+        cat > gki_ksu_susfs.fragment << 'EOF'
+        # KernelSU
+        CONFIG_KSU=y
+        CONFIG_KSU_DEBUG=y
         
-    - name: Configure kernel
-      run: |
-        cd ~/kernel
-        export PATH=~/toolchain/clang-r487747c/bin:~/toolchain/gcc-aarch64/bin:~/toolchain/build-tools/path/linux-x86:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        export CROSS_COMPILE=aarch64-linux-android-
-        export CC=clang
-        export LD=ld.lld
+        # SUSFS4KSU
+        CONFIG_SUSFS=y
+        CONFIG_SUSFS_SUS_SU=y
+        CONFIG_SUSFS_SUS_MOUNT=y  
+        CONFIG_SUSFS_SUS_KSTAT=y
+        CONFIG_SUSFS_SUS_OVERLAYFS=y
+        CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+        CONFIG_SUSFS_SUS_PATH=y
+        CONFIG_SUSFS_TRY_UMOUNT=y
+        EOF
         
-        # Use GKI defconfig
-        make O=out gki_defconfig
-        
-        # Enable KernelSU
-        echo "CONFIG_KSU=y" >> out/.config
-        echo "CONFIG_KSU_DEBUG=y" >> out/.config
-        
-        # Enable SUSFS if available
-        if [ -d "KernelSU/userspace/susfs4ksu" ]; then
-          echo "CONFIG_SUSFS=y" >> out/.config
-        fi
-        
-        # Regenerate config
-        make O=out olddefconfig
+        # Add fragment to build config
+        echo "FRAGMENT_CONFIG=gki_ksu_susfs.fragment" >> build.config.gki.aarch64
         
     - name: Build kernel
       run: |
-        cd ~/kernel
-        export PATH=~/toolchain/clang-r487747c/bin:~/toolchain/gcc-aarch64/bin:~/toolchain/build-tools/path/linux-x86:$PATH
-        export ARCH=arm64
-        export SUBARCH=arm64
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        export CROSS_COMPILE=aarch64-linux-android-
-        export CC=clang
-        export LD=ld.lld
-        
-        # Build kernel
-        make O=out -j$(nproc) 2>&1 | tee build.log
+        cd android-kernel
+        BUILD_CONFIG=build.config.gki.aarch64 build/build.sh
         
     - name: Prepare artifacts
       run: |
-        cd ~/kernel
-        mkdir -p ~/artifacts
+        cd android-kernel
+        mkdir -p artifacts
         
-        # Copy kernel image
-        if [ -f "out/arch/arm64/boot/Image.gz" ]; then
-          cp out/arch/arm64/boot/Image.gz ~/artifacts/
-        elif [ -f "out/arch/arm64/boot/Image" ]; then
-          cp out/arch/arm64/boot/Image ~/artifacts/
-        fi
+        # Copy kernel images
+        find out -name "Image" -exec cp {} artifacts/ \;
+        find out -name "Image.gz" -exec cp {} artifacts/ \;  
+        find out -name "Image.lz4" -exec cp {} artifacts/ \;
+        find out -name "*.img" -exec cp {} artifacts/ \;
         
-        # Copy kernel headers if needed
-        if [ -f "out/arch/arm64/boot/dts/qcom/*.dtb" ]; then
-          mkdir -p ~/artifacts/dtbs
-          cp out/arch/arm64/boot/dts/qcom/*.dtb ~/artifacts/dtbs/
-        fi
+        # Copy to dist directory if needed
+        cp -r out/*/dist/* artifacts/ 2>/dev/null || true
         
-        # Copy build log
-        cp build.log ~/artifacts/
+        # Build info
+        echo "Build: $(date)" > artifacts/build-info.txt
+        echo "Branch: common-android14-6.1-lts" >> artifacts/build-info.txt
+        echo "KernelSU: YES" >> artifacts/build-info.txt
+        echo "SUSFS4KSU: YES (gki-android14-6.1)" >> artifacts/build-info.txt
         
-        # Create info file
-        cat > ~/artifacts/build-info.txt << EOF
-        Build Date: $(date)
-        Kernel Version: $(cat out/include/generated/utsrelease.h | cut -d'"' -f2)
-        KernelSU: $(if [ -d "KernelSU" ]; then echo "Yes"; else echo "No"; fi)
-        SUSFS4KSU: $(if [ -d "KernelSU/userspace/susfs4ksu" ]; then echo "Yes"; else echo "No"; fi)
-        Compiler: $(~/toolchain/clang-r487747c/bin/clang --version | head -n1)
-        EOF
+        ls -la artifacts/
         
-    - name: Upload kernel artifacts
+    - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: gki-kernel-kernelsu-susfs
-        path: ~/artifacts/
+        name: android-kernel-ksu-susfs
+        path: android-kernel/artifacts/
         retention-days: 30
-        
-    - name: Upload build logs on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs-failed
-        path: |
-          ~/kernel/build.log
-          ~/kernel/out/.config
-        retention-days: 7
-
-    - name: Create release on tag
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ~/artifacts/*
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
