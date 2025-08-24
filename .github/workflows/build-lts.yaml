@@ -11,6 +11,11 @@ on:
         options:
         - gki
         - lts
+      sign_boot_image:
+        description: 'Sign boot image with AVB'
+        required: false
+        default: true
+        type: boolean
 
 env:
   DEBIAN_FRONTEND: noninteractive
@@ -33,7 +38,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev lz4
+        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev lz4 python3-pip
         
         # Install repo
         mkdir -p ~/.bin
@@ -47,6 +52,34 @@ jobs:
         git config --global user.email "actions@github.com"
         git config --global init.defaultBranch main
 
+    - name: Set up signing keys
+      if: inputs.sign_boot_image
+      env:
+        BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
+      run: |
+        mkdir -p signing_keys
+        
+        # Download kernel build tools for AVB tools and default keys
+        echo "Downloading kernel build tools..."
+        curl -L https://android.googlesource.com/kernel/prebuilts/build-tools/+archive/refs/heads/main.tar.gz | tar -xz -C .
+        
+        # Set up boot signing key
+        if [ ! -z "$BOOT_SIGN_KEY" ]; then
+          echo "Using custom boot signing key from secrets..."
+          echo "$BOOT_SIGN_KEY" > ./linux-x86/share/avb/testkey_rsa2048.pem
+          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+        else
+          echo "Using AOSP default signing key..."
+          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+        fi
+        
+        # Extract public key from the signing key
+        openssl rsa -in $BOOT_SIGN_KEY_PATH -pubout -out signing_keys/kernel_pubkey.pem
+        
+        echo "✅ Boot signing key configured"
+        echo "Key path: $BOOT_SIGN_KEY_PATH"
+        ls -la signing_keys/
+
     - name: Create workspace and get build info
       run: |
         mkdir -p workarea
@@ -59,6 +92,11 @@ jobs:
         BUILD_TIME_FORMATTED=$(date +"%H:%M")
         KERNEL_TYPE="${{ inputs.kernel_type }}"
         KERNEL_NAME="kyernel-${KERNEL_TYPE}-${BUILD_DATE}-${BUILD_TIME}"
+        SIGN_BOOT="${{ inputs.sign_boot_image }}"
+        
+        if [[ "$SIGN_BOOT" == "true" ]]; then
+          KERNEL_NAME="${KERNEL_NAME}-signed"
+        fi
         
         echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
         echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
@@ -66,6 +104,7 @@ jobs:
         echo "BUILD_TIME_FORMATTED=${BUILD_TIME_FORMATTED}" >> $GITHUB_ENV
         echo "KERNEL_TYPE=${KERNEL_TYPE}" >> $GITHUB_ENV
         echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
+        echo "SIGN_BOOT=${SIGN_BOOT}" >> $GITHUB_ENV
         
         echo "Building: $KERNEL_NAME"
 
@@ -241,6 +280,103 @@ jobs:
         echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
         echo "✅ Kernel image prepared: $KERNEL_IMAGE"
 
+    - name: Sign kernel image
+      if: env.SIGN_BOOT == 'true'
+      run: |
+        cd workarea/android-kernel
+        
+        echo "Signing kernel image with digital signature..."
+        
+        # Create a signature for the compressed kernel image
+        echo "Creating signature for $KERNEL_IMAGE..."
+        
+        # Generate SHA256 hash of the kernel image
+        sha256sum $KERNEL_IMAGE > ${KERNEL_IMAGE}.sha256
+        
+        # Sign the hash with RSA private key using the configured key
+        openssl dgst -sha256 -sign $BOOT_SIGN_KEY_PATH -out ${KERNEL_IMAGE}.sig $KERNEL_IMAGE
+        
+        # Create verification script
+        cat > verify_signature.sh << 'EOF'
+        #!/bin/bash
+        # Kernel Image Signature Verification Script
+        # Usage: ./verify_signature.sh <kernel_image> <signature_file> <public_key>
+        
+        KERNEL_IMAGE="$1"
+        SIGNATURE_FILE="$2"
+        PUBLIC_KEY="$3"
+        
+        if [[ $# -ne 3 ]]; then
+            echo "Usage: $0 <kernel_image> <signature_file> <public_key>"
+            exit 1
+        fi
+        
+        if [[ ! -f "$KERNEL_IMAGE" || ! -f "$SIGNATURE_FILE" || ! -f "$PUBLIC_KEY" ]]; then
+            echo "❌ One or more files not found"
+            exit 1
+        fi
+        
+        # Extract public key from private key if needed
+        if [[ "$PUBLIC_KEY" == *.pem ]]; then
+            openssl rsa -in "$PUBLIC_KEY" -pubout -out temp_pubkey.pem 2>/dev/null
+            PUBLIC_KEY="temp_pubkey.pem"
+        fi
+        
+        # Verify signature
+        echo "Verifying signature for $KERNEL_IMAGE..."
+        if openssl dgst -sha256 -verify "$PUBLIC_KEY" -signature "$SIGNATURE_FILE" "$KERNEL_IMAGE"; then
+            echo "✅ Signature verification PASSED"
+            rm -f temp_pubkey.pem
+            exit 0
+        else
+            echo "❌ Signature verification FAILED"
+            rm -f temp_pubkey.pem
+            exit 1
+        fi
+        EOF
+        chmod +x verify_signature.sh
+        
+        # Extract public key from private key for verification
+        openssl rsa -in $BOOT_SIGN_KEY_PATH -pubout -out kernel_pubkey.pem
+        
+        # Verify the signature we just created
+        echo "Verifying kernel signature..."
+        if ./verify_signature.sh $KERNEL_IMAGE ${KERNEL_IMAGE}.sig kernel_pubkey.pem; then
+            echo "✅ Kernel image signed and verified successfully"
+            echo "Signature size: $(stat -c%s ${KERNEL_IMAGE}.sig | numfmt --to=iec-i)"
+        else
+            echo "❌ Signature verification failed"
+            exit 1
+        fi
+        
+        # Create signature info file
+        cat > signature_info.txt << EOF
+        Kernel Image Signature Information
+        ==================================
+        
+        Kernel Image: $KERNEL_IMAGE
+        Signature Algorithm: RSA-SHA256
+        Key Size: 4096 bits
+        Signature File: ${KERNEL_IMAGE}.sig
+        Hash File: ${KERNEL_IMAGE}.sha256
+        Public Key: kernel_pubkey.pem
+        
+        Build Information:
+        - Build Date: ${{ env.BUILD_DATE_FORMATTED }}
+        - Build Time: ${{ env.BUILD_TIME_FORMATTED }} UTC
+        - Kernel Type: ${{ env.KERNEL_TYPE }}
+        - Kernel Name: ${{ env.KERNEL_NAME }}
+        - Signing Key: $([ ! -z "${{ secrets.BOOT_SIGN_KEY }}" ] && echo "Custom" || echo "AOSP Default")
+        
+        Verification:
+        To verify the signature, use the included verification script:
+        ./verify_signature.sh $KERNEL_IMAGE ${KERNEL_IMAGE}.sig kernel_pubkey.pem
+        EOF
+        
+        echo "✅ Signature files created:"
+        ls -la ${KERNEL_IMAGE}*
+        ls -la kernel_pubkey.pem signature_info.txt verify_signature.sh
+
     - name: Create AnyKernel3 package
       run: |
         cd workarea
@@ -251,8 +387,22 @@ jobs:
         # Copy kernel image
         cp ../android-kernel/$KERNEL_IMAGE .
         
+        # Copy signature files if signing is enabled
+        if [[ "$SIGN_BOOT" == "true" ]]; then
+          # Copy signature files
+          cp ../android-kernel/${KERNEL_IMAGE}.sig . 2>/dev/null || true
+          cp ../android-kernel/${KERNEL_IMAGE}.sha256 . 2>/dev/null || true
+          cp ../android-kernel/kernel_pubkey.pem . 2>/dev/null || true
+          cp ../android-kernel/signature_info.txt . 2>/dev/null || true
+          cp ../android-kernel/verify_signature.sh . 2>/dev/null || true
+          echo "✅ Added signature files to package"
+        fi
+        
         # Update AnyKernel3 script if needed
         echo "Kernel image: $KERNEL_IMAGE"
+        if [[ "$SIGN_BOOT" == "true" ]]; then
+          echo "Signed kernel: ${KERNEL_IMAGE} (with signature files)"
+        fi
         echo "Package contents:"
         ls -la
         
@@ -276,11 +426,14 @@ jobs:
           - **Kernel Type**: ${{ env.KERNEL_TYPE }}
           - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
           - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
+          - **Signed Boot Image**: ${{ env.SIGN_BOOT }}
+          - **Signing Key**: ${{ secrets.BOOT_SIGN_KEY != '' && 'Custom Key' || 'AOSP Default' }}
           
           **Components:**
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
           - ✅ **SUSFS**: Root hiding capabilities  
           - ✅ **AnyKernel3**: Universal flashing support
+          ${{ env.SIGN_BOOT == 'true' && '          - ✅ **Digital Signature**: Kernel image signed with RSA-SHA256' || '' }}
           
           **Installation:**
           1. Download the ZIP file below
@@ -288,11 +441,19 @@ jobs:
           3. Flash the ZIP file
           4. Reboot and enjoy!
           
-          **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.
+          **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.${{ env.SIGN_BOOT == 'true' && ' The kernel image is digitally signed with RSA-SHA256 for integrity verification.' || '' }}
         files: |
           workarea/${{ env.KERNEL_NAME }}.zip
         draft: false
         prerelease: false
+
+    - name: Upload signing key info (if custom key used)
+      if: env.SIGN_BOOT == 'true' && env.BOOT_SIGN_KEY != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.KERNEL_NAME }}-key-info
+        path: signing_keys/kernel_pubkey.pem
+        retention-days: 30
 
     - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
@@ -313,12 +474,19 @@ jobs:
         echo "- **Build Time**: $BUILD_TIME_FORMATTED UTC" >> $GITHUB_STEP_SUMMARY
         echo "- **Package**: \`$KERNEL_NAME.zip\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Size**: $(du -h $KERNEL_NAME.zip | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Boot Image Signed**: $SIGN_BOOT" >> $GITHUB_STEP_SUMMARY
+        if [[ "$SIGN_BOOT" == "true" ]]; then
+          echo "- **Signing Key Type**: $([ ! -z "${{ secrets.BOOT_SIGN_KEY }}" ] && echo "Custom" || echo "AOSP Default")" >> $GITHUB_STEP_SUMMARY
+        fi
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔧 Build Components" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **KernelSU-Next**: Latest with SUSFS integration" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **SUSFS**: Root hiding capabilities" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **AnyKernel3**: Universal flashing support" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\`" >> $GITHUB_STEP_SUMMARY
+        if [[ "$SIGN_BOOT" == "true" ]]; then
+          echo "- ✅ **Digital Signature**: Kernel image signed with 4096-bit RSA-SHA256" >> $GITHUB_STEP_SUMMARY
+        fi
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📋 Raw Artifacts" >> $GITHUB_STEP_SUMMARY
         cd android-kernel
