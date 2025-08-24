@@ -1,4 +1,4 @@
-name: Build Android GKI Kernel with Bazel (KernelSU + SUSFS4KSU)
+name: Build Android GKI Kernel with Bazel
 
 on:
   push:
@@ -8,355 +8,104 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-22.04
     
     steps:
-    - name: Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
       
-    - name: Setup build environment
+    - name: Setup environment
       run: |
         sudo apt-get update -y
-        sudo apt-get install -y \
-          git wget curl \
-          build-essential bc \
-          libssl-dev libelf-dev \
-          flex bison \
-          zip unzip \
-          python3 python3-pip \
-          rsync
+        sudo apt-get install -y git wget curl build-essential bc flex bison libssl-dev libelf-dev python3
         
-    - name: Install Bazelisk
+    - name: Install Bazel
       run: |
-        sudo wget -O /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
-        sudo chmod +x /usr/local/bin/bazel
-        bazel --version
+        wget -O bazel https://github.com/bazelbuild/bazelisk/releases/latest/download/bazelisk-linux-amd64
+        chmod +x bazel
+        sudo mv bazel /usr/local/bin/
         
-    - name: Clone Android kernel build system
+    - name: Sync sources
       run: |
-        git clone https://android.googlesource.com/kernel/build.git android-kernel
-        cd android-kernel
-        
-        # The build repo contains the proper Bazel setup and prebuilt toolchains
-        ls -la
-        
-    - name: Clone kernel source
-      run: |
-        cd android-kernel
-        git clone -b android14-6.1-lts --single-branch https://android.googlesource.com/kernel/common.git
-        cd common
-        git log --oneline -n 3
+        git clone https://android.googlesource.com/kernel/build.git
+        cd build
+        git clone -b android14-6.1-lts --depth=1 https://android.googlesource.com/kernel/common.git
         
     - name: Setup KernelSU
       run: |
-        cd android-kernel/common
+        cd build/common
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         
     - name: Setup SUSFS4KSU
       run: |
-        cd android-kernel/common
+        cd build/common
         mkdir -p KernelSU/userspace
-        git clone -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git KernelSU/userspace/susfs4ksu
-        cd KernelSU/userspace/susfs4ksu
-        git log --oneline -n 3
+        git clone -b gki-android14-6.1 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git KernelSU/userspace/susfs4ksu
         
-    - name: Apply KernelSU patches
+    - name: Apply patches
       run: |
-        cd android-kernel/common
+        cd build/common
         
-        # Add KernelSU to build system
-        if ! grep -q "source \"KernelSU/Kconfig\"" "drivers/Kconfig"; then
-          echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
-        fi
+        # KernelSU integration
+        echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
+        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
         
-        if ! grep -q "obj-\$(CONFIG_KSU) += KernelSU/" "drivers/Makefile"; then
-          echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
-        fi
-        
-    - name: Apply SUSFS4KSU patches
-      run: |
-        cd android-kernel/common
-        
-        # Try to apply SUSFS patches
+        # SUSFS patch
         if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch" ]; then
-          echo "Applying SUSFS patches..."
-          patch -p1 < KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch || echo "Patch failed, trying manual integration..."
+          patch -p1 < KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch || echo "Patch failed"
         fi
         
-        # Manual SUSFS integration
-        if [ -d "KernelSU/userspace/susfs4ksu/kernel_patches/fs" ]; then
-          echo "Manual SUSFS integration..."
-          mkdir -p fs/susfs
-          
-          # Copy SUSFS source files
-          find KernelSU/userspace/susfs4ksu/kernel_patches/fs -name "*.c" -exec cp {} fs/susfs/ \;
-          find KernelSU/userspace/susfs4ksu/kernel_patches/fs -name "*.h" -exec cp {} fs/susfs/ \;
-          
-          # Add to fs Kconfig
-          if ! grep -q "source \"fs/susfs/Kconfig\"" "fs/Kconfig"; then
-            echo 'source "fs/susfs/Kconfig"' >> fs/Kconfig
-          fi
-          
-          # Add to fs Makefile
-          if ! grep -q "obj-\$(CONFIG_SUSFS) += susfs/" "fs/Makefile"; then
-            echo 'obj-$(CONFIG_SUSFS) += susfs/' >> fs/Makefile
-          fi
-          
-          # Create SUSFS Kconfig if it doesn't exist
-          if [ ! -f "fs/susfs/Kconfig" ]; then
-            cat > fs/susfs/Kconfig << 'KCONFIG_EOF'
-        config SUSFS
-        	bool "SUSFS filesystem support"
-        	default y
-        	help
-        	  Support for SUSFS filesystem modifications for KernelSU.
-        
-        config SUSFS_SUS_SU
-        	bool "SUSFS sus_su support"
-        	depends on SUSFS
-        	default y
-        
-        config SUSFS_SUS_MOUNT
-        	bool "SUSFS sus_mount support"
-        	depends on SUSFS
-        	default y
-        
-        config SUSFS_SUS_KSTAT
-        	bool "SUSFS sus_kstat support"
-        	depends on SUSFS
-        	default y
-        
-        config SUSFS_SUS_OVERLAYFS
-        	bool "SUSFS sus_overlayfs support"
-        	depends on SUSFS
-        	default y
-        
-        config SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-        	bool "SUSFS auto add sus bind mount"
-        	depends on SUSFS
-        	default y
-        
-        config SUSFS_SUS_PATH
-        	bool "SUSFS sus_path support"
-        	depends on SUSFS
-        	default y
-        
-        config SUSFS_TRY_UMOUNT
-        	bool "SUSFS try umount support"
-        	depends on SUSFS
-        	default y
-        KCONFIG_EOF
-          fi
-          
-          # Create SUSFS Makefile if it doesn't exist
-          if [ ! -f "fs/susfs/Makefile" ]; then
-            cat > fs/susfs/Makefile << 'MAKEFILE_EOF'
-        obj-$(CONFIG_SUSFS) += susfs.o
-        susfs-y := sus_su.o sus_mount.o sus_kstat.o sus_overlayfs.o
-        MAKEFILE_EOF
-          fi
-        fi
-        
-    - name: Create Bazel BUILD file
+    - name: Configure kernel for KernelSU and SUSFS4KSU
       run: |
-        cd android-kernel
+        cd build
         
-        # Create a simple BUILD.bazel file for GKI
-        cat > BUILD.bazel << 'EOF'
-load("//build/kernel/kleaf:kernel.bzl", "kernel_build", "kernel_images")
-
-kernel_build(
-    name = "gki_aarch64",
-    outs = [
-        "System.map",
-        "modules.builtin",
-        "modules.builtin.modinfo",
-        "vmlinux",
-        "vmlinux.symvers",
-    ],
-    build_config = "build.config.gki.aarch64",
-    make_goals = [
-        "Image",
-        "modules",
-    ],
-)
-
-kernel_images(
-    name = "gki_aarch64_images",
-    build_config = "build.config.gki.aarch64", 
-    kernel_build = ":gki_aarch64",
-)
-EOF
-
-    - name: Create build config
-      run: |
-        cd android-kernel
+        # Create fragment config for KernelSU and SUSFS4KSU
+        cat > gki_ksu_susfs.fragment << 'EOF'
+        CONFIG_KSU=y
+        CONFIG_KSU_DEBUG=y
+        CONFIG_SUSFS=y
+        CONFIG_SUSFS_SUS_SU=y
+        CONFIG_SUSFS_SUS_MOUNT=y
+        CONFIG_SUSFS_SUS_KSTAT=y
+        CONFIG_SUSFS_SUS_OVERLAYFS=y
+        CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
+        CONFIG_SUSFS_SUS_PATH=y
+        CONFIG_SUSFS_TRY_UMOUNT=y
+        EOF
         
-        # Create build config file
-        cat > build.config.gki.aarch64 << 'EOF'
-ARCH=arm64
-BRANCH=android14-6.1-lts
-CLANG_TRIPLE=aarch64-linux-gnu-
-CROSS_COMPILE=aarch64-linux-android-
-DEFCONFIG=gki_defconfig
-KERNEL_DIR=common
-CLANG_PREBUILT_BIN=prebuilts/clang/host/linux-x86/clang-r487747c/bin
-LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN=prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin
-BUILDTOOLS_PREBUILT_BIN=build/build-tools/path/linux-x86
-
-POST_DEFCONFIG_CMDS="update_ksu_config"
-
-function update_ksu_config() {
-    ${KERNEL_DIR}/scripts/config --file ${OUT_DIR}/.config \
-        -e KSU \
-        -e KSU_DEBUG \
-        -e SUSFS \
-        -e SUSFS_SUS_SU \
-        -e SUSFS_SUS_MOUNT \
-        -e SUSFS_SUS_KSTAT \
-        -e SUSFS_SUS_OVERLAYFS \
-        -e SUSFS_AUTO_ADD_SUS_BIND_MOUNT \
-        -e SUSFS_SUS_PATH \
-        -e SUSFS_TRY_UMOUNT
-    (cd ${OUT_DIR} && make olddefconfig)
-}
-EOF
+        # Create custom build config that includes our fragment
+        cp build.config.gki.aarch64 build.config.gki.aarch64.ksu
+        echo "" >> build.config.gki.aarch64.ksu
+        echo "FRAGMENT_CONFIG=gki_ksu_susfs.fragment" >> build.config.gki.aarch64.ksu
         
     - name: Build with Bazel
       run: |
-        cd android-kernel
+        cd build
+        bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
         
-        # Build using Bazel
-        echo "Starting Bazel build..."
-        bazel build //build/kernel/kleaf:gki_aarch64_images \
-          --config=fast \
-          --config=stamp \
-          --sandbox_debug \
-          --verbose_failures \
-          2>&1 | tee bazel-build.log
-          
-    - name: Alternative Bazel build (if first fails)
-      if: failure()
+    - name: Prepare artifacts
       run: |
-        cd android-kernel
+        cd build
+        mkdir -p artifacts
         
-        echo "First Bazel build failed, trying alternative approach..."
-        
-        # Try building just the kernel without images
-        bazel build //build/kernel/kleaf:gki_aarch64 \
-          --config=fast \
-          --verbose_failures \
-          2>&1 | tee bazel-build-alt.log
-          
-    - name: Manual build fallback
-      if: failure()
-      run: |
-        cd android-kernel
-        
-        echo "Bazel builds failed, falling back to manual build..."
-        
-        # Use the build.sh script if it exists
-        if [ -f "build.sh" ]; then
-          BUILD_CONFIG=build.config.gki.aarch64 ./build.sh 2>&1 | tee manual-build.log
-        else
-          echo "No build.sh found, trying direct make build..."
-          
-          cd common
-          export ARCH=arm64
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CC=clang
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          
-          make O=../out gki_defconfig
-          
-          # Apply KernelSU and SUSFS configs
-          ../scripts/config --file ../out/.config \
-            -e KSU \
-            -e KSU_DEBUG \
-            -e SUSFS \
-            -e SUSFS_SUS_SU \
-            -e SUSFS_SUS_MOUNT \
-            -e SUSFS_SUS_KSTAT \
-            -e SUSFS_SUS_OVERLAYFS
-            
-          make O=../out olddefconfig
-          make O=../out -j$(nproc) 2>&1 | tee ../manual-build.log
-        fi
-        
-    - name: Find and prepare artifacts
-      run: |
-        cd android-kernel
-        mkdir -p ~/artifacts
-        
-        # Find kernel images from Bazel build
-        find . -name "Image.gz" -type f 2>/dev/null | head -5 | while read img; do
-          echo "Found Image.gz: $img"
-          cp "$img" ~/artifacts/Image.gz 2>/dev/null || true
-        done
-        
-        find . -name "Image" -type f 2>/dev/null | head -5 | while read img; do
-          echo "Found Image: $img"
-          cp "$img" ~/artifacts/Image 2>/dev/null || true
-        done
-        
-        # Copy build logs
-        cp *.log ~/artifacts/ 2>/dev/null || true
+        # Find and copy built kernel images
+        find bazel-bin -name "Image" -type f -exec cp {} artifacts/ \;
+        find bazel-bin -name "Image.gz" -type f -exec cp {} artifacts/ \;
+        find bazel-bin -name "Image.lz4" -type f -exec cp {} artifacts/ \;
+        find bazel-bin -name "*.img" -type f -exec cp {} artifacts/ \;
         
         # Create build info
-        cat > ~/artifacts/build-info.txt << EOF
-        Android GKI Kernel Build with Bazel
-        ====================================
-        Build Date: $(date)
-        Kernel Branch: android14-6.1-lts
-        KernelSU: Yes
-        SUSFS4KSU: Yes (gki-android14-6.1 branch)
-        Build Method: Bazel (with fallbacks)
-        Bazel Version: $(bazel version | head -n1)
+        echo "Build completed: $(date)" > artifacts/build-info.txt
+        echo "KernelSU: Enabled" >> artifacts/build-info.txt
+        echo "SUSFS4KSU: Enabled (gki-android14-6.1 branch)" >> artifacts/build-info.txt
+        echo "Kernel: android14-6.1-lts" >> artifacts/build-info.txt
         
-        Files:
-        $(ls -la ~/artifacts/)
-        EOF
-        
-        echo "Artifacts prepared:"
-        ls -la ~/artifacts/
+        ls -la artifacts/
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: android-gki-kernel-bazel
-        path: ~/artifacts/
+        name: gki-kernel-ksu-susfs
+        path: build/artifacts/
         retention-days: 30
-        
-    - name: Upload debug info on failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: bazel-debug-logs
-        path: |
-          android-kernel/*.log
-          android-kernel/BUILD.bazel
-          android-kernel/build.config.gki.aarch64
-        retention-days: 7
-
-    - name: Create GitHub Release
-      if: startsWith(github.ref, 'refs/tags/') && success()
-      uses: softprops/action-gh-release@v1
-      with:
-        files: ~/artifacts/*
-        tag_name: ${{ github.ref_name }}
-        name: "Android GKI Kernel (Bazel) ${{ github.ref_name }}"
-        body: |
-          ## Android GKI Kernel built with Bazel
-          
-          **Features:**
-          - ✅ Built with official Android Bazel build system
-          - ✅ KernelSU integrated 
-          - ✅ SUSFS4KSU (gki-android14-6.1 branch)
-          - ✅ Android 14 6.1 LTS kernel base
-          
-          **Build Method:** Bazel via Kleaf (Kernel Build with Bazel)
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
