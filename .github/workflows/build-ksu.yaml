@@ -105,56 +105,56 @@ jobs:
           
           # Create SUSFS Kconfig if it doesn't exist
           if [ ! -f "fs/susfs/Kconfig" ]; then
-            cat > fs/susfs/Kconfig << 'EOF'
-config SUSFS
-	bool "SUSFS filesystem support"
-	default y
-	help
-	  Support for SUSFS filesystem modifications for KernelSU.
-
-config SUSFS_SUS_SU
-	bool "SUSFS sus_su support"
-	depends on SUSFS
-	default y
-
-config SUSFS_SUS_MOUNT
-	bool "SUSFS sus_mount support"
-	depends on SUSFS
-	default y
-
-config SUSFS_SUS_KSTAT
-	bool "SUSFS sus_kstat support"
-	depends on SUSFS
-	default y
-
-config SUSFS_SUS_OVERLAYFS
-	bool "SUSFS sus_overlayfs support"
-	depends on SUSFS
-	default y
-
-config SUSFS_AUTO_ADD_SUS_BIND_MOUNT
-	bool "SUSFS auto add sus bind mount"
-	depends on SUSFS
-	default y
-
-config SUSFS_SUS_PATH
-	bool "SUSFS sus_path support"
-	depends on SUSFS
-	default y
-
-config SUSFS_TRY_UMOUNT
-	bool "SUSFS try umount support"
-	depends on SUSFS
-	default y
-EOF
+            cat > fs/susfs/Kconfig << 'KCONFIG_EOF'
+        config SUSFS
+        	bool "SUSFS filesystem support"
+        	default y
+        	help
+        	  Support for SUSFS filesystem modifications for KernelSU.
+        
+        config SUSFS_SUS_SU
+        	bool "SUSFS sus_su support"
+        	depends on SUSFS
+        	default y
+        
+        config SUSFS_SUS_MOUNT
+        	bool "SUSFS sus_mount support"
+        	depends on SUSFS
+        	default y
+        
+        config SUSFS_SUS_KSTAT
+        	bool "SUSFS sus_kstat support"
+        	depends on SUSFS
+        	default y
+        
+        config SUSFS_SUS_OVERLAYFS
+        	bool "SUSFS sus_overlayfs support"
+        	depends on SUSFS
+        	default y
+        
+        config SUSFS_AUTO_ADD_SUS_BIND_MOUNT
+        	bool "SUSFS auto add sus bind mount"
+        	depends on SUSFS
+        	default y
+        
+        config SUSFS_SUS_PATH
+        	bool "SUSFS sus_path support"
+        	depends on SUSFS
+        	default y
+        
+        config SUSFS_TRY_UMOUNT
+        	bool "SUSFS try umount support"
+        	depends on SUSFS
+        	default y
+        KCONFIG_EOF
           fi
           
           # Create SUSFS Makefile if it doesn't exist
           if [ ! -f "fs/susfs/Makefile" ]; then
-            cat > fs/susfs/Makefile << 'EOF'
-obj-$(CONFIG_SUSFS) += susfs.o
-susfs-y := sus_su.o sus_mount.o sus_kstat.o sus_overlayfs.o
-EOF
+            cat > fs/susfs/Makefile << 'MAKEFILE_EOF'
+        obj-$(CONFIG_SUSFS) += susfs.o
+        susfs-y := sus_su.o sus_mount.o sus_kstat.o sus_overlayfs.o
+        MAKEFILE_EOF
           fi
         fi
         
