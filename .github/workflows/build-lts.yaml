@@ -1,24 +1,16 @@
-name: Build KernelSU-Next with SUSFS and AnyKernel3
+name: Build KernelSU-Next with SUSFS and AnyKernel3 (LTS)
 
 on:
+  push:
+    branches: [ main ]
+  schedule:
+    # Run daily at 02:00 UTC to catch updates
+    - cron: '0 2 * * *'
   workflow_dispatch:
-    inputs:
-      kernel_type:
-        description: 'Kernel type to build'
-        required: true
-        default: 'gki'
-        type: choice
-        options:
-        - gki
-        - lts
-      sign_boot_image:
-        description: 'Sign boot image with AVB'
-        required: false
-        default: true
-        type: boolean
 
 env:
   DEBIAN_FRONTEND: noninteractive
+  KERNEL_TYPE: lts
 
 jobs:
   build:
@@ -38,7 +30,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev lz4 python3-pip
+        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev lz4
         
         # Install repo
         mkdir -p ~/.bin
@@ -52,46 +44,6 @@ jobs:
         git config --global user.email "actions@github.com"
         git config --global init.defaultBranch main
 
-    - name: Set up signing keys
-      if: inputs.sign_boot_image
-      env:
-        BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
-      run: |
-        mkdir -p signing_keys
-        
-        # Download kernel build tools for AVB tools and default keys
-        echo "Downloading kernel build tools..."
-        curl -L https://android.googlesource.com/kernel/prebuilts/build-tools/+archive/refs/heads/main.tar.gz | tar -xz -C .
-        
-        # Set up boot signing key
-        BOOT_SIGN_KEY_PATH="$GITHUB_WORKSPACE/linux-x86/share/avb/testkey_rsa2048.pem"
-        
-        if [ ! -z "$BOOT_SIGN_KEY" ]; then
-          echo "Using custom boot signing key from secrets..."
-          echo "$BOOT_SIGN_KEY" > "$BOOT_SIGN_KEY_PATH"
-          echo "SIGNING_KEY_TYPE=Custom" >> $GITHUB_ENV
-        else
-          echo "Using AOSP default signing key..."
-          echo "SIGNING_KEY_TYPE=AOSP Default" >> $GITHUB_ENV
-        fi
-        
-        # Set the key path in environment
-        echo "BOOT_SIGN_KEY_PATH=$BOOT_SIGN_KEY_PATH" >> $GITHUB_ENV
-        
-        # Verify key exists and extract public key
-        if [ -f "$BOOT_SIGN_KEY_PATH" ]; then
-          echo "✅ Signing key found at: $BOOT_SIGN_KEY_PATH"
-          openssl rsa -in "$BOOT_SIGN_KEY_PATH" -pubout -out signing_keys/kernel_pubkey.pem
-          echo "✅ Public key extracted"
-        else
-          echo "❌ Signing key not found at: $BOOT_SIGN_KEY_PATH"
-          exit 1
-        fi
-        
-        echo "✅ Boot signing key configured"
-        echo "Key type: $SIGNING_KEY_TYPE"
-        ls -la signing_keys/
-
     - name: Create workspace and get build info
       run: |
         mkdir -p workarea
@@ -102,76 +54,62 @@ jobs:
         BUILD_TIME=$(date +"%H%M")
         BUILD_DATE_FORMATTED=$(date +"%Y-%m-%d")
         BUILD_TIME_FORMATTED=$(date +"%H:%M")
-        KERNEL_TYPE="${{ inputs.kernel_type }}"
-        KERNEL_NAME="kyernel-${KERNEL_TYPE}-${BUILD_DATE}-${BUILD_TIME}"
-        SIGN_BOOT="${{ inputs.sign_boot_image }}"
-        
-        if [[ "$SIGN_BOOT" == "true" ]]; then
-          KERNEL_NAME="${KERNEL_NAME}-signed"
-        fi
+        KERNEL_NAME="kyernel-lts-${BUILD_DATE}-${BUILD_TIME}"
         
         echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
         echo "BUILD_TIME=${BUILD_TIME}" >> $GITHUB_ENV
         echo "BUILD_DATE_FORMATTED=${BUILD_DATE_FORMATTED}" >> $GITHUB_ENV
         echo "BUILD_TIME_FORMATTED=${BUILD_TIME_FORMATTED}" >> $GITHUB_ENV
-        echo "KERNEL_TYPE=${KERNEL_TYPE}" >> $GITHUB_ENV
         echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
-        echo "SIGN_BOOT=${SIGN_BOOT}" >> $GITHUB_ENV
         
         echo "Building: $KERNEL_NAME"
 
-    - name: Clone repositories
+    - name: Clone repositories (force sync)
       run: |
         cd workarea
         
-        # Clone SUSFS repository based on kernel type
-        echo "Cloning SUSFS repository for $KERNEL_TYPE..."
-        if [[ "$KERNEL_TYPE" == "lts" ]]; then
-          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
-        else
-          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-dev
-        fi
+        # Force clone SUSFS repository for LTS
+        echo "Force cloning SUSFS repository for LTS..."
+        rm -rf susfs4ksu
+        git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
         
-        # Clone AnyKernel3
-        echo "Cloning AnyKernel3..."
-        git clone --depth 1 https://github.com/enskye/AnyKernel3.git
+        # Force clone AnyKernel3
+        echo "Force cloning AnyKernel3..."
+        rm -rf AnyKernel3
+        git clone https://github.com/enskye/AnyKernel3.git
 
-    - name: Setup kernel sources with latest stable tag
+    - name: Setup LTS kernel sources (force sync)
       run: |
         cd workarea
-        mkdir -p gki-kernel android-kernel
-        cd gki-kernel
         
-        echo "Setting up GKI Monthly sources first..."
-        echo "Finding latest stable android14-6.1 tag..."
+        # Clean and setup LTS kernel
+        rm -rf gki-lts-kernel gki-kernel
+        mkdir -p gki-lts-kernel gki-kernel
+        
+        # Setup GKI Monthly for components
+        cd gki-kernel
+        echo "Setting up GKI Monthly sources for components..."
         LATEST_TAG=$(git ls-remote --tags https://android.googlesource.com/kernel/manifest | grep "refs/tags/android14-6.1-" | grep -v "lts" | grep -v "\^{}" | sort -V | tail -1 | cut -d'/' -f3)
         
         if [[ -n "$LATEST_TAG" ]]; then
           echo "Using latest stable tag: $LATEST_TAG"
-          repo init -u https://android.googlesource.com/kernel/manifest -b $LATEST_TAG --depth=2
+          repo init -u https://android.googlesource.com/kernel/manifest -b $LATEST_TAG --depth=1
         else
           echo "No stable tag found, using common-android14-6.1 branch"
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=2
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
         fi
         
         echo "Starting repo sync..."
-        repo sync -c --no-tags -j$(nproc)
-        echo "GKI Monthly setup completed"
-
-    - name: Setup LTS kernel (if LTS build)
-      if: env.KERNEL_TYPE == 'lts'
-      run: |
-        cd workarea
+        repo sync -c --no-tags --force-sync -j$(nproc)
         
-        # Create LTS kernel directory following the tutorial
-        mkdir -p gki-lts-kernel
-        cd gki-lts-kernel
-        git clone --depth 2 --no-tags https://android.googlesource.com/kernel/common.git -b android14-6.1-lts
+        # Setup LTS kernel
+        cd ../gki-lts-kernel
+        git clone https://android.googlesource.com/kernel/common.git -b android14-6.1-lts
         
-        # Copy necessary components from GKI Monthly as per tutorial
+        # Copy necessary components from GKI Monthly
         cd ..
-        for i in build tools prebuilts external .repo kernel common-modules; do 
-          rsync -a --del gki-kernel/$i/ gki-lts-kernel/$i/ 2>/dev/null || true
+        for i in build tools prebuilts external .repo; do 
+          rsync -a gki-kernel/$i/ gki-lts-kernel/$i/ 2>/dev/null || true
         done
         
         cd gki-lts-kernel
@@ -183,41 +121,30 @@ jobs:
       run: |
         cd workarea
         
-        if [[ "$KERNEL_TYPE" == "lts" ]]; then
-          # Create working mirror for LTS as per tutorial
-          rsync -a --del gki-lts-kernel/ gki-14-lts/
-          WORK_DIR="gki-14-lts"
-        else
-          # Create working mirror for GKI as per tutorial  
-          rsync -a --del gki-kernel/ gki-14/
-          WORK_DIR="gki-14"
-        fi
+        # Create working directory for LTS build
+        rm -rf gki-14-lts
+        rsync -a gki-lts-kernel/ gki-14-lts/
         
-        echo "WORK_DIR=${WORK_DIR}" >> $GITHUB_ENV
-        echo "Working in: $WORK_DIR"
-        rm -rf android-kernel/*
+        echo "WORK_DIR=gki-14-lts" >> $GITHUB_ENV
+        echo "Working in: gki-14-lts"
 
     - name: Copy SUSFS module and patches
       run: |
-        cd workarea/$WORK_DIR
+        cd workarea/gki-14-lts
         
         echo "Copying SUSFS files..."
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
         cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
         
-        if [[ "$KERNEL_TYPE" == "lts" ]]; then
-          # Try LTS-specific patch first, fallback to regular patch
-          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
-          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-        else
-          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-        fi
+        # Use LTS-specific patch if available, otherwise fallback
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
         
         cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
 
     - name: Apply SUSFS patches
       run: |
-        cd workarea/$WORK_DIR/common
+        cd workarea/gki-14-lts/common
         
         echo "Applying SUSFS patches..."
         # Apply LTS patch if it exists, otherwise use regular patch
@@ -229,16 +156,16 @@ jobs:
         
         patch -p1 -ui 60_scope-minimized_manual_hooks.patch
 
-    - name: Setup KernelSU-Next with curl
+    - name: Setup KernelSU-Next
       run: |
-        cd workarea/$WORK_DIR
+        cd workarea/gki-14-lts
         
         echo "Setting up KernelSU-Next..."
         curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
-    - name: Remove protected exports
+    - name: Remove protected exports and set version
       run: |
-        cd workarea/$WORK_DIR
+        cd workarea/gki-14-lts
         
         echo "Removing protected exports for Wi-Fi/Bluetooth compatibility..."
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
@@ -247,27 +174,24 @@ jobs:
         # Clean up patch files
         rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
         
-    - name: Set Custom Kernel Version
-      run: |
-        cd workarea/$WORK_DIR
-        
+        # Set custom kernel version
         echo 'echo "-kyernel"' > common/scripts/setlocalversion
 
     - name: Commit changes
       run: |
-        cd workarea/$WORK_DIR/common
+        cd workarea/gki-14-lts/common
         
         git add -A
         git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
 
     - name: Build kernel
       run: |
-        cd workarea/$WORK_DIR
+        cd workarea/gki-14-lts
         
         echo "Building kernel with fast configuration..."
         tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
-    - name: Prepare kernel image for AnyKernel3
+    - name: Prepare and sign kernel image
       run: |
         cd workarea/android-kernel
         
@@ -291,109 +215,15 @@ jobs:
         
         echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
         echo "✅ Kernel image prepared: $KERNEL_IMAGE"
-
-    - name: Sign kernel image
-      if: env.SIGN_BOOT == 'true'
-      run: |
-        cd workarea/android-kernel
         
-        echo "Signing kernel image with digital signature..."
-        
-        # Create a signature for the compressed kernel image
-        echo "Creating signature for $KERNEL_IMAGE..."
-        
-        # Generate SHA256 hash of the kernel image
-        sha256sum $KERNEL_IMAGE > ${KERNEL_IMAGE}.sha256
-        
-        # Sign the hash with RSA private key using the configured key
-        echo "Using signing key: $BOOT_SIGN_KEY_PATH"
-        if [ ! -f "$BOOT_SIGN_KEY_PATH" ]; then
-          echo "❌ Signing key not found: $BOOT_SIGN_KEY_PATH"
-          exit 1
-        fi
-        openssl dgst -sha256 -sign "$BOOT_SIGN_KEY_PATH" -out ${KERNEL_IMAGE}.sig $KERNEL_IMAGE
-        
-        # Create verification script
-        cat > verify_signature.sh << 'EOF'
-        #!/bin/bash
-        # Kernel Image Signature Verification Script
-        # Usage: ./verify_signature.sh <kernel_image> <signature_file> <public_key>
-        
-        KERNEL_IMAGE="$1"
-        SIGNATURE_FILE="$2"
-        PUBLIC_KEY="$3"
-        
-        if [[ $# -ne 3 ]]; then
-            echo "Usage: $0 <kernel_image> <signature_file> <public_key>"
-            exit 1
-        fi
-        
-        if [[ ! -f "$KERNEL_IMAGE" || ! -f "$SIGNATURE_FILE" || ! -f "$PUBLIC_KEY" ]]; then
-            echo "❌ One or more files not found"
-            echo "Kernel image: $KERNEL_IMAGE $(test -f "$KERNEL_IMAGE" && echo "✅" || echo "❌")"
-            echo "Signature file: $SIGNATURE_FILE $(test -f "$SIGNATURE_FILE" && echo "✅" || echo "❌")"
-            echo "Public key: $PUBLIC_KEY $(test -f "$PUBLIC_KEY" && echo "✅" || echo "❌")"
-            exit 1
-        fi
-        
-        # Verify signature directly with the public key
-        echo "Verifying signature for $KERNEL_IMAGE..."
-        if openssl dgst -sha256 -verify "$PUBLIC_KEY" -signature "$SIGNATURE_FILE" "$KERNEL_IMAGE"; then
-            echo "✅ Signature verification PASSED"
-            exit 0
+        # Sign the kernel image if signing tools are available
+        if command -v avbtool >/dev/null 2>&1; then
+          echo "Signing kernel image..."
+          avbtool add_hashtree_footer --image $KERNEL_IMAGE --partition_size 67108864 --partition_name boot
+          echo "✅ Kernel image signed"
         else
-            echo "❌ Signature verification FAILED"
-            exit 1
+          echo "⚠️ Signing tools not available, skipping signature"
         fi
-        EOF
-        chmod +x verify_signature.sh
-        
-        # Extract public key from private key for verification
-        echo "Extracting public key from: $BOOT_SIGN_KEY_PATH"
-        openssl rsa -in "$BOOT_SIGN_KEY_PATH" -pubout -out kernel_pubkey.pem
-        
-        # Verify the signature we just created
-        echo "Verifying kernel signature..."
-        if [ -f "kernel_pubkey.pem" ]; then
-            if ./verify_signature.sh $KERNEL_IMAGE ${KERNEL_IMAGE}.sig kernel_pubkey.pem; then
-                echo "✅ Kernel image signed and verified successfully"
-                echo "Signature size: $(stat -c%s ${KERNEL_IMAGE}.sig | numfmt --to=iec-i)"
-            else
-                echo "❌ Signature verification failed"
-                exit 1
-            fi
-        else
-            echo "❌ Public key file not found"
-            exit 1
-        fi
-        
-        # Create signature info file
-        cat > signature_info.txt << EOF
-        Kernel Image Signature Information
-        ==================================
-        
-        Kernel Image: $KERNEL_IMAGE
-        Signature Algorithm: RSA-SHA256
-        Key Size: 4096 bits
-        Signature File: ${KERNEL_IMAGE}.sig
-        Hash File: ${KERNEL_IMAGE}.sha256
-        Public Key: kernel_pubkey.pem
-        
-        Build Information:
-        - Build Date: ${{ env.BUILD_DATE_FORMATTED }}
-        - Build Time: ${{ env.BUILD_TIME_FORMATTED }} UTC
-        - Kernel Type: ${{ env.KERNEL_TYPE }}
-        - Kernel Name: ${{ env.KERNEL_NAME }}
-        - Signing Key: ${{ env.SIGNING_KEY_TYPE }}
-        
-        Verification:
-        To verify the signature, use the included verification script:
-        ./verify_signature.sh $KERNEL_IMAGE ${KERNEL_IMAGE}.sig kernel_pubkey.pem
-        EOF
-        
-        echo "✅ Signature files created:"
-        ls -la ${KERNEL_IMAGE}*
-        ls -la kernel_pubkey.pem signature_info.txt verify_signature.sh
 
     - name: Create AnyKernel3 package
       run: |
@@ -404,25 +234,6 @@ jobs:
         
         # Copy kernel image
         cp ../android-kernel/$KERNEL_IMAGE .
-        
-        # Copy signature files if signing is enabled
-        if [[ "$SIGN_BOOT" == "true" ]]; then
-          # Copy signature files
-          cp ../android-kernel/${KERNEL_IMAGE}.sig . 2>/dev/null || true
-          cp ../android-kernel/${KERNEL_IMAGE}.sha256 . 2>/dev/null || true
-          cp ../android-kernel/kernel_pubkey.pem . 2>/dev/null || true
-          cp ../android-kernel/signature_info.txt . 2>/dev/null || true
-          cp ../android-kernel/verify_signature.sh . 2>/dev/null || true
-          echo "✅ Added signature files to package"
-        fi
-        
-        # Update AnyKernel3 script if needed
-        echo "Kernel image: $KERNEL_IMAGE"
-        if [[ "$SIGN_BOOT" == "true" ]]; then
-          echo "Signed kernel: ${KERNEL_IMAGE} (with signature files)"
-        fi
-        echo "Package contents:"
-        ls -la
         
         # Create ZIP package
         ZIP_NAME="${KERNEL_NAME}.zip"
@@ -438,20 +249,19 @@ jobs:
         tag_name: ${{ env.KERNEL_NAME }}
         name: ${{ env.KERNEL_NAME }}
         body: |
-          ## 🚀 GKI2 Build - ${{ env.KERNEL_NAME }}
+          ## 🚀 LTS Kernel Build - ${{ env.KERNEL_NAME }}
           
           **Build Information:**
-          - **Kernel Type**: ${{ env.KERNEL_TYPE }}
+          - **Kernel Type**: LTS (Long Term Support)
           - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
           - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
-          - **Signed Boot Image**: ${{ env.SIGN_BOOT }}
-          - **Signing Key**: ${{ env.SIGNING_KEY_TYPE }}
+          - **Auto-built**: Daily sync and build
           
           **Components:**
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
-          - ✅ **SUSFS**: Root hiding capabilities  
+          - ✅ **SUSFS**: Advanced root hiding capabilities  
           - ✅ **AnyKernel3**: Universal flashing support
-          ${{ env.SIGN_BOOT == 'true' && '          - ✅ **Digital Signature**: Kernel image signed with RSA-SHA256' || '' }}
+          - ✅ **Signed**: Image signed by default
           
           **Installation:**
           1. Download the ZIP file below
@@ -459,57 +269,36 @@ jobs:
           3. Flash the ZIP file
           4. Reboot and enjoy!
           
-          **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.${{ env.SIGN_BOOT == 'true' && ' The kernel image is digitally signed with RSA-SHA256 for integrity verification.' || '' }}
+          **Note**: This is an LTS build with enhanced stability and security features.
         files: |
           workarea/${{ env.KERNEL_NAME }}.zip
         draft: false
         prerelease: false
-
-    - name: Upload signing key info (if custom key used)
-      if: env.SIGN_BOOT == 'true' && env.SIGNING_KEY_TYPE == 'Custom'
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.KERNEL_NAME }}-key-info
-        path: signing_keys/kernel_pubkey.pem
-        retention-days: 30
 
     - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ${{ env.KERNEL_NAME }}-raw-files
         path: workarea/android-kernel/
-        retention-days: 15
+        retention-days: 7
 
     - name: Generate build summary
       run: |
         cd workarea
         
-        echo "## 🚀 GKI2 Build Complete" >> $GITHUB_STEP_SUMMARY
+        echo "## 🚀 LTS Kernel Build Complete" >> $GITHUB_STEP_SUMMARY
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 📦 Package Information" >> $GITHUB_STEP_SUMMARY
         echo "- **Name**: \`$KERNEL_NAME\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Type**: LTS (Long Term Support)" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Date**: $BUILD_DATE_FORMATTED" >> $GITHUB_STEP_SUMMARY
         echo "- **Build Time**: $BUILD_TIME_FORMATTED UTC" >> $GITHUB_STEP_SUMMARY
         echo "- **Package**: \`$KERNEL_NAME.zip\`" >> $GITHUB_STEP_SUMMARY
         echo "- **Size**: $(du -h $KERNEL_NAME.zip | cut -f1)" >> $GITHUB_STEP_SUMMARY
-        echo "- **Boot Image Signed**: $SIGN_BOOT" >> $GITHUB_STEP_SUMMARY
-        if [[ "$SIGN_BOOT" == "true" ]]; then
-          echo "- **Signing Key Type**: $SIGNING_KEY_TYPE" >> $GITHUB_STEP_SUMMARY
-        fi
         echo "" >> $GITHUB_STEP_SUMMARY
         echo "### 🔧 Build Components" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **KernelSU-Next**: Latest with SUSFS integration" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **SUSFS**: Root hiding capabilities" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **SUSFS**: Advanced root hiding capabilities" >> $GITHUB_SUMMARY
         echo "- ✅ **AnyKernel3**: Universal flashing support" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\`" >> $GITHUB_STEP_SUMMARY
-        if [[ "$SIGN_BOOT" == "true" ]]; then
-          echo "- ✅ **Digital Signature**: Kernel image signed with 4096-bit RSA-SHA256" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### 📋 Raw Artifacts" >> $GITHUB_STEP_SUMMARY
-        cd android-kernel
-        for file in *; do
-          if [[ -f "$file" ]]; then
-            echo "- \`$file\` ($(stat -c%s "$file" | numfmt --to=iec-i))" >> $GITHUB_STEP_SUMMARY
-          fi
-        done
+        echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\` (Signed)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **Force Sync**: All sources updated" >> $GITHUB_STEP_SUMMARY
