@@ -13,7 +13,6 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        # Fetch only the latest commit to save space and time
         fetch-depth: 1
       
     - name: Free Up Disk Space
@@ -24,8 +23,9 @@ jobs:
         sudo rm -rf /usr/share/dotnet
         sudo rm -rf /opt/ghc
         sudo rm -rf "/usr/local/share/boost"
-        sudo swapoff /swapfile
-        sudo rm /swapfile
+        # Ignore errors if swapfile doesn't exist
+        sudo swapoff /swapfile || true
+        sudo rm /swapfile || true
         echo "Free space after cleanup:"
         df -h
 
@@ -37,9 +37,7 @@ jobs:
     - name: Setup repo and sync sources
       run: |
         mkdir android-kernel && cd android-kernel
-        # Initialize repo with a shallow clone (--depth=1) to download only the latest revision
         repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts
-        # Sync only the current branch (-c) and without tags to save space
         repo sync -c -j$(nproc --all) --no-clone-bundle --no-tags --optimized-fetch --prune
         
     - name: Setup KernelSU
@@ -59,7 +57,7 @@ jobs:
         
         # KernelSU integration
         echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
-        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
+        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/drivers/Makefile
         
         # Try SUSFS patch
         if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch" ]; then
@@ -70,7 +68,7 @@ jobs:
       run: |
         cd android-kernel
         
-        # Create config fragment with all SUSFS4KSU options
+        # Create config fragment
         cat > gki_ksu_susfs.fragment << 'EOF'
         # KernelSU
         CONFIG_KSU=y
@@ -100,14 +98,12 @@ jobs:
         cd android-kernel
         mkdir -p artifacts
         
-        # Copy kernel images
+        # Copy kernel images and other outputs
         find out -name "Image" -exec cp {} artifacts/ \;
         find out -name "Image.gz" -exec cp {} artifacts/ \;  
         find out -name "Image.lz4" -exec cp {} artifacts/ \;
         find out -name "*.img" -exec cp {} artifacts/ \;
-        
-        # Copy to dist directory if needed
-        cp -r out/*/dist/* artifacts/ 2>/null || true
+        cp -r out/*/dist/* artifacts/ 2>/dev/null || true
         
         # Build info
         echo "Build: $(date)" > artifacts/build-info.txt
