@@ -3,9 +3,6 @@ name: Build KernelSU-Next with SUSFS and AnyKernel3 (LTS)
 on:
   push:
     branches: [ main ]
-  schedule:
-    # Run daily at 02:00 UTC to catch updates
-    - cron: '0 2 * * *'
   workflow_dispatch:
 
 env:
@@ -184,14 +181,38 @@ jobs:
         git add -A
         git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
 
+    - name: Setup signing keys for Bazel
+      run: |
+        cd workarea/gki-14-lts
+        
+        # Create signing keys directory
+        mkdir -p signing
+        
+        if [[ -n "${{ secrets.KERNEL_SIGNING_KEY }}" && -n "${{ secrets.KERNEL_SIGNING_CERT }}" ]]; then
+          echo "Setting up kernel signing keys from GitHub Secrets..."
+          echo "${{ secrets.KERNEL_SIGNING_KEY }}" | base64 -d > signing/kernel_key.pem
+          echo "${{ secrets.KERNEL_SIGNING_CERT }}" | base64 -d > signing/kernel_cert.pem
+          SIGNING_ARGS="--action_env=KBUILD_SIGN_PIN= --action_env=KBUILD_SIGN_CERT=signing/kernel_cert.pem --action_env=KBUILD_SIGN_KEY=signing/kernel_key.pem"
+        else
+          echo "No signing keys found in secrets, generating temporary keys for development..."
+          # Generate temporary self-signed keys for development builds
+          openssl genrsa -out signing/kernel_key.pem 4096
+          openssl req -new -x509 -key signing/kernel_key.pem -out signing/kernel_cert.pem -days 365 -subj "/C=US/ST=Dev/L=Build/O=Kyernel/CN=kyernel-lts"
+          SIGNING_ARGS="--action_env=KBUILD_SIGN_PIN= --action_env=KBUILD_SIGN_CERT=signing/kernel_cert.pem --action_env=KBUILD_SIGN_KEY=signing/kernel_key.pem"
+          echo "⚠️ Using temporary development keys. For production, add KERNEL_SIGNING_KEY and KERNEL_SIGNING_CERT to repository secrets."
+        fi
+        
+        echo "SIGNING_ARGS=${SIGNING_ARGS}" >> $GITHUB_ENV
+        echo "✅ Kernel signing keys prepared"
+
     - name: Build kernel
       run: |
         cd workarea/gki-14-lts
         
-        echo "Building kernel with fast configuration..."
-        tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        echo "Building kernel with signing enabled..."
+        tools/bazel run --config=fast --config=stamp --lto=thin $SIGNING_ARGS //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
 
-    - name: Prepare and sign kernel image
+    - name: Prepare kernel image
       run: |
         cd workarea/android-kernel
         
@@ -214,16 +235,8 @@ jobs:
         fi
         
         echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
-        echo "✅ Kernel image prepared: $KERNEL_IMAGE"
-        
-        # Sign the kernel image if signing tools are available
-        if command -v avbtool >/dev/null 2>&1; then
-          echo "Signing kernel image..."
-          avbtool add_hashtree_footer --image $KERNEL_IMAGE --partition_size 67108864 --partition_name boot
-          echo "✅ Kernel image signed"
-        else
-          echo "⚠️ Signing tools not available, skipping signature"
-        fi
+        echo "✅ Kernel image prepared and compressed: $KERNEL_IMAGE"
+        echo "✅ Image was signed during Bazel build process"
 
     - name: Create AnyKernel3 package
       run: |
