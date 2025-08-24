@@ -88,7 +88,7 @@ jobs:
     - name: Build with Bazel
       run: |
         cd build
-        BUILD_CONFIG=build.config.gki.aarch64.ksu bazel build --config=fast --config=stamp //common:kernel_aarch64_dist
+        BUILD_CONFIG=build.config.gki.aarch64.ksu ./build.sh
         
     - name: Prepare artifacts
       run: |
