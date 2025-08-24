@@ -64,20 +64,32 @@ jobs:
         curl -L https://android.googlesource.com/kernel/prebuilts/build-tools/+archive/refs/heads/main.tar.gz | tar -xz -C .
         
         # Set up boot signing key
+        BOOT_SIGN_KEY_PATH="$GITHUB_WORKSPACE/linux-x86/share/avb/testkey_rsa2048.pem"
+        
         if [ ! -z "$BOOT_SIGN_KEY" ]; then
           echo "Using custom boot signing key from secrets..."
-          echo "$BOOT_SIGN_KEY" > ./linux-x86/share/avb/testkey_rsa2048.pem
-          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+          echo "$BOOT_SIGN_KEY" > "$BOOT_SIGN_KEY_PATH"
+          echo "SIGNING_KEY_TYPE=Custom" >> $GITHUB_ENV
         else
           echo "Using AOSP default signing key..."
-          echo "BOOT_SIGN_KEY_PATH=$GITHUB_WORKSPACE/linux-x86/share/avb/testkey_rsa2048.pem" >> $GITHUB_ENV
+          echo "SIGNING_KEY_TYPE=AOSP Default" >> $GITHUB_ENV
         fi
         
-        # Extract public key from the signing key
-        openssl rsa -in $BOOT_SIGN_KEY_PATH -pubout -out signing_keys/kernel_pubkey.pem
+        # Set the key path in environment
+        echo "BOOT_SIGN_KEY_PATH=$BOOT_SIGN_KEY_PATH" >> $GITHUB_ENV
+        
+        # Verify key exists and extract public key
+        if [ -f "$BOOT_SIGN_KEY_PATH" ]; then
+          echo "✅ Signing key found at: $BOOT_SIGN_KEY_PATH"
+          openssl rsa -in "$BOOT_SIGN_KEY_PATH" -pubout -out signing_keys/kernel_pubkey.pem
+          echo "✅ Public key extracted"
+        else
+          echo "❌ Signing key not found at: $BOOT_SIGN_KEY_PATH"
+          exit 1
+        fi
         
         echo "✅ Boot signing key configured"
-        echo "Key path: $BOOT_SIGN_KEY_PATH"
+        echo "Key type: $SIGNING_KEY_TYPE"
         ls -la signing_keys/
 
     - name: Create workspace and get build info
@@ -294,7 +306,12 @@ jobs:
         sha256sum $KERNEL_IMAGE > ${KERNEL_IMAGE}.sha256
         
         # Sign the hash with RSA private key using the configured key
-        openssl dgst -sha256 -sign $BOOT_SIGN_KEY_PATH -out ${KERNEL_IMAGE}.sig $KERNEL_IMAGE
+        echo "Using signing key: $BOOT_SIGN_KEY_PATH"
+        if [ ! -f "$BOOT_SIGN_KEY_PATH" ]; then
+          echo "❌ Signing key not found: $BOOT_SIGN_KEY_PATH"
+          exit 1
+        fi
+        openssl dgst -sha256 -sign "$BOOT_SIGN_KEY_PATH" -out ${KERNEL_IMAGE}.sig $KERNEL_IMAGE
         
         # Create verification script
         cat > verify_signature.sh << 'EOF'
