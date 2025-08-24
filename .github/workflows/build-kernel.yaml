@@ -28,17 +28,19 @@ jobs:
       - name: Initialize & Sync GKI Kernel Source
         run: |
           mkdir kernel && cd kernel
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-2025-08 --depth=1
+          # Using the stable LTS manifest branch
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
           repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
           echo "KERNEL_REPO=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
 
       - name: Integrate KernelSU
         working-directory: ${{ env.KERNEL_REPO }}
         run: |
+          # Use the official setup script
           curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           echo "✅ KernelSU integrated successfully."
 
-      - name: Integrate susfs4ksu (Ignoring Failures)
+      - name: Integrate susfs4ksu (Full Patching Process)
         run: |
           echo "Cloning susfs4ksu repository..."
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 --branch gki-android14-6.1 /tmp/susfs4ksu
@@ -49,23 +51,25 @@ jobs:
           cp -r /tmp/susfs4ksu/kernel_patches/fs/* ${{ env.KERNEL_REPO }}/common/fs/
           cp -r /tmp/susfs4ksu/kernel_patches/include/linux/* ${{ env.KERNEL_REPO }}/common/include/linux/
 
-          echo "Applying patches and ignoring failures..."
-          # Apply the KernelSU-specific patch, ignoring rejects
-          cd ${{ env.KERNEL_REPO }}/KernelSU && patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
-
-          # Apply the main kernel patch, ignoring rejects
-          cd ${{ env.KERNEL_REPO }}/common && patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android14-6.1.patch || true
-          echo "✅ susfs4ksu integration attempted."
+          echo "Applying patches with fuzz factor 3..."
+          # Apply the KernelSU-specific patch with fuzz
+          cd ${{ env.KERNEL_REPO }}/KernelSU && patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
+          
+          # Apply the main kernel patch with fuzz
+          cd ${{ env.KERNEL_REPO }}/common && patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android14-6.1.patch
+          echo "✅ susfs4ksu integrated successfully."
 
       - name: Configure Kernel Parameters
         run: |
           BUILD_CONFIG_PATH="${{ env.KERNEL_REPO }}/common/build.config.gki.aarch64"
           echo "Appending required kernel parameters..."
+          # The KSU setup script already adds CONFIG_KSU=y
           echo "CONFIG_KSU_SUSFS=y" >> $BUILD_CONFIG_PATH
           echo "✅ Kernel parameters configured."
 
       - name: Apply GKI Android 14+ Fixes
         run: |
+          # Remove ABI symbol list files that can cause module loading issues
           rm -f $KERNEL_REPO/common/android/abi_gki_protected_exports_aarch64
           rm -f $KERNEL_REPO/common/android/abi_gki_protected_exports_x86_64
           echo "✅ GKI ABI files removed."
@@ -74,6 +78,7 @@ jobs:
         id: build
         working-directory: ${{ env.KERNEL_REPO }}
         run: |
+          # Start the build.
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
           echo "✅ Kernel build completed."
           echo "Contents of dist directory:"
