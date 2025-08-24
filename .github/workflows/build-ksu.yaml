@@ -12,7 +12,23 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+      with:
+        # Fetch only the latest commit to save space and time
+        fetch-depth: 1
       
+    - name: Free Up Disk Space
+      run: |
+        echo "Initial free space:"
+        df -h
+        # Remove large pre-installed packages not needed for this build
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /opt/ghc
+        sudo rm -rf "/usr/local/share/boost"
+        sudo swapoff /swapfile
+        sudo rm /swapfile
+        echo "Free space after cleanup:"
+        df -h
+
     - name: Install dependencies
       run: |
         sudo apt update
@@ -21,8 +37,10 @@ jobs:
     - name: Setup repo and sync sources
       run: |
         mkdir android-kernel && cd android-kernel
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts
-        repo sync
+        # Initialize repo with a shallow clone (--depth=1) to download only the latest revision
+        repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts
+        # Sync only the current branch (-c) and without tags to save space
+        repo sync -c -j$(nproc --all) --no-clone-bundle --no-tags --optimized-fetch --prune
         
     - name: Setup KernelSU
       run: |
@@ -89,7 +107,7 @@ jobs:
         find out -name "*.img" -exec cp {} artifacts/ \;
         
         # Copy to dist directory if needed
-        cp -r out/*/dist/* artifacts/ 2>/dev/null || true
+        cp -r out/*/dist/* artifacts/ 2>/null || true
         
         # Build info
         echo "Build: $(date)" > artifacts/build-info.txt
@@ -105,3 +123,4 @@ jobs:
         name: android-kernel-ksu-susfs
         path: android-kernel/artifacts/
         retention-days: 30
+        
