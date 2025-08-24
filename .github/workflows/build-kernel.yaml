@@ -1,9 +1,14 @@
 # .github/workflows/build-kernel.yml
 
-name: Build Android Kernel with KernelSU & susfs4ksu
+name: Build GKI Kernel with KernelSU & susfs
 
 on:
-  workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      susfs_ref:
+        description: 'susfs tag, commit, or branch to use'
+        required: true
+        default: 'main'
 
 jobs:
   build:
@@ -11,67 +16,80 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Workflow Repo
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Install Dependencies & Setup Repo Tool
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses-dev libsdl2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses-dev libsdl2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev
+          mkdir -p ~/.bin && curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo && chmod a+x ~/.bin/repo
+          export PATH="$HOME/.bin:$PATH"
+          git config --global user.name "GitHub Actions" && git config --global user.email "actions@github.com"
 
-      - name: Set up AOSP Repo Tool
-        run: |
-          mkdir -p ~/.bin
-          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-          chmod a+x ~/.bin/repo
-          sudo ln -sf ~/.bin/repo /usr/bin/repo
-          git config --global user.name "GitHub Actions"
-          git config --global user.email "actions@github.com"
-
-      - name: Initialize & Sync Kernel Source
+      - name: Initialize & Sync GKI Kernel Source
         run: |
           mkdir kernel && cd kernel
-          # CORRECTED: Changed the manifest branch name
           repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
-          # Sync the repositories
           repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
+          echo "KERNEL_REPO=$GITHUB_WORKSPACE/kernel" >> $GITHUB_ENV
 
-      - name: Integrate susfs4ksu
-        working-directory: ./kernel/common
+      - name: Integrate KernelSU (via setup.sh)
+        working-directory: ${{ env.KERNEL_REPO }}
         run: |
-          # Add the susfs4ksu repository as a remote
-          git remote add susfs https://gitlab.com/simonpunk/susfs4ksu.git
-          # Fetch the remote branch
-          git fetch --depth=1 susfs gki-android14-6.1
-          # Merge the susfs4ksu changes
-          git merge susfs/gki-android14-6.1 --no-edit
-          echo "✅ susfs4ksu integrated successfully."
-
-      - name: Integrate KernelSU
-        working-directory: ./kernel
-        run: |
-          # Download and run the KernelSU integration script
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          # Use the official setup script as requested
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
           echo "✅ KernelSU integrated successfully."
+
+      - name: Integrate susfs (Developer Patch Method)
+        run: |
+          echo "Cloning susfs branch/tag: ${{ inputs.susfs_ref }}"
+          git clone https://gitlab.com/Simon-P/susfs.git --depth=1 --branch ${{ inputs.susfs_ref }} /tmp/susfs
+
+          echo "Copying susfs source and patch files..."
+          # 1. Copy patch files
+          cp /tmp/susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch $KERNEL_REPO/KernelSU/
+          cp /tmp/susfs/kernel_patches/50_add_susfs_in_kernel-6.1.patch $KERNEL_REPO/common/
+          
+          # 2. Copy source files
+          cp -r /tmp/susfs/kernel_patches/fs/* $KERNEL_REPO/common/fs/
+          cp -r /tmp/susfs/kernel_patches/include/linux/* $KERNEL_REPO/common/include/linux/
+
+          echo "Applying patches..."
+          # 3. Apply KernelSU patch
+          cd $KERNEL_REPO/KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
+          
+          # 4. Apply common kernel patch
+          cd $KERNEL_REPO/common && patch -p1 < 50_add_susfs_in_kernel-6.1.patch
+          echo "✅ susfs integrated successfully."
+
+      - name: Configure Build
+        run: |
+          BUILD_CONFIG_PATH="$KERNEL_REPO/common/build.config.gki.aarch64"
+          echo "CONFIG_KSU=y" >> $BUILD_CONFIG_PATH
+          echo "CONFIG_KSU_SUSFS=y" >> $BUILD_CONFIG_PATH
+          echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> $BUILD_CONFIG_PATH
+          echo "✅ Build configured with KernelSU and susfs."
+
+      - name: Apply GKI Android 14+ Fixes
+        run: |
+          rm -f $KERNEL_REPO/common/android/abi_gki_protected_exports_aarch64
+          rm -f $KERNEL_REPO/common/android/abi_gki_protected_exports_x86_64
+          echo "✅ GKI ABI files removed."
 
       - name: Build Kernel with Bazel (Kleaf)
         id: build
-        working-directory: ./kernel
+        working-directory: ${{ env.KERNEL_REPO }}
         run: |
-          # Set up environment variables
-          export ARCH=arm64
-          export DIST_DIR=out
-          # Start the build process using the official build script
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
           echo "✅ Kernel build completed."
-          # List the contents of the output directory
-          echo "Contents of $DIST_DIR:"
+          echo "Contents of dist directory:"
           ls -R $DIST_DIR
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: kernel-artifacts
-          path: kernel/out/
+          path: ${{ env.KERNEL_REPO }}/out/dist/
           if-no-files-found: error
           
