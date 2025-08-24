@@ -1,122 +1,77 @@
-name: Android Kernel Build (Official Method)
+# .github/workflows/build-ksu.yml
+
+name: Build Android Kernel with KernelSU & susfs4ksu
 
 on:
-  push:
-  pull_request:
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to run this workflow manually from the Actions tab
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 1
-      
-    - name: Free Up Disk Space
-      run: |
-        echo "Initial free space:"
-        df -h
-        # Remove large pre-installed packages not needed for this build
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf "/usr/local/share/boost"
-        # Ignore errors if swapfile doesn't exist
-        sudo swapoff /swapfile || true
-        sudo rm /swapfile || true
-        echo "Free space after cleanup:"
-        df -h
+    name: Build GKI Kernel
+    runs-on: ubuntu-latest
 
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y git wget curl build-essential bc flex bison libssl-dev libelf-dev python3 zip repo
-        
-    - name: Setup repo and sync sources
-      run: |
-        mkdir android-kernel && cd android-kernel
-        repo init --depth=1 -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts
-        repo sync -c -j$(nproc --all) --no-clone-bundle --no-tags --optimized-fetch --prune
-        
-    - name: Setup KernelSU
-      run: |
-        cd android-kernel/common
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-        
-    - name: Setup SUSFS4KSU
-      run: |
-        cd android-kernel/common
-        mkdir -p KernelSU/userspace
-        git clone -b gki-android14-6.1 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git KernelSU/userspace/susfs4ksu
-        
-    - name: Apply patches
-      run: |
-        cd android-kernel/common
-        
-        # KernelSU integration
-        echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
-        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
-        
-        # Try SUSFS patch
-        if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch" ]; then
-          patch -p1 < KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch || echo "Patch failed, continuing..."
-        fi
-        
-    - name: Configure kernel for KernelSU and SUSFS4KSU
-      run: |
-        cd android-kernel
-        
-        # Create config fragment
-        cat > gki_ksu_susfs.fragment << 'EOF'
-        # KernelSU
-        CONFIG_KSU=y
-        CONFIG_KSU_DEBUG=y
-        
-        # SUSFS4KSU
-        CONFIG_SUSFS=y
-        CONFIG_SUSFS_SUS_SU=y
-        CONFIG_SUSFS_SUS_MOUNT=y  
-        CONFIG_SUSFS_SUS_KSTAT=y
-        CONFIG_SUSFS_SUS_OVERLAYFS=y
-        CONFIG_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y
-        CONFIG_SUSFS_SUS_PATH=y
-        CONFIG_SUSFS_TRY_UMOUNT=y
-        EOF
-        
-        # Add fragment to build config
-        echo "FRAGMENT_CONFIG=gki_ksu_susfs.fragment" >> build.config.gki.aarch64
-        
-    - name: Build kernel
-      run: |
-        cd android-kernel
-        BUILD_CONFIG=build.config.gki.aarch64 build/build.sh
-        
-    - name: Prepare artifacts
-      run: |
-        cd android-kernel
-        mkdir -p artifacts
-        
-        # Copy kernel images and other outputs
-        find out -name "Image" -exec cp {} artifacts/ \;
-        find out -name "Image.gz" -exec cp {} artifacts/ \;  
-        find out -name "Image.lz4" -exec cp {} artifacts/ \;
-        find out -name "*.img" -exec cp {} artifacts/ \;
-        cp -r out/*/dist/* artifacts/ 2>/dev/null || true
-        
-        # Build info
-        echo "Build: $(date)" > artifacts/build-info.txt
-        echo "Branch: common-android14-6.1-lts" >> artifacts/build-info.txt
-        echo "KernelSU: YES" >> artifacts/build-info.txt
-        echo "SUSFS4KSU: YES (gki-android14-6.1)" >> artifacts/build-info.txt
-        
-        ls -la artifacts/
-        
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: android-kernel-ksu-susfs
-        path: android-kernel/artifacts/
-        retention-days: 30
-        
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3.10
+
+      - name: Set up AOSP Repo Tool
+        run: |
+          mkdir -p ~/.bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+          chmod a+x ~/.bin/repo
+          sudo ln -sf ~/.bin/repo /usr/bin/repo
+          git config --global user.name "Your Name"
+          git config --global user.email "you@example.com"
+
+      - name: Initialize & Sync Kernel Source
+        run: |
+          mkdir kernel && cd kernel
+          # Initialize repo for the specified kernel branch
+          repo init -u https://android.googlesource.com/kernel/manifest -b android14-6.1-lts
+          # Sync the repositories
+          repo sync -c -j$(nproc --all)
+
+      - name: Integrate susfs4ksu
+        working-directory: ./kernel/common
+        run: |
+          # Add the susfs4ksu repository as a remote
+          git remote add susfs https://gitlab.com/simonpunk/susfs4ksu.git
+          # Fetch the remote branches
+          git fetch susfs gki-android14-6.1
+          # Merge the susfs4ksu changes
+          git merge susfs/gki-android14-6.1 --no-edit
+          echo "✅ susfs4ksu integrated successfully."
+
+      - name: Integrate KernelSU
+        working-directory: ./kernel
+        run: |
+          # Download and run the KernelSU integration script
+          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
+          echo "✅ KernelSU integrated successfully."
+
+      - name: Build Kernel with Bazel (Kleaf)
+        id: build
+        working-directory: ./kernel
+        run: |
+          # Set up environment variables
+          export ARCH=arm64
+          export DIST_DIR=out
+          # Start the build process using the official build script
+          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+          echo "✅ Kernel build completed."
+          # List the contents of the output directory
+          echo "Contents of $DIST_DIR:"
+          ls -R $DIST_DIR
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-artifacts
+          path: kernel/out/
+          if-no-files-found: error
+          
