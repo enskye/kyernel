@@ -17,7 +17,6 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          # CORRECTED: Updated package names for modern Ubuntu versions
           sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses-dev libsdl2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
 
       - name: Set up AOSP Repo Tool
@@ -32,8 +31,8 @@ jobs:
       - name: Initialize & Sync Kernel Source
         run: |
           mkdir kernel && cd kernel
-          # Initialize repo for the specified kernel branch
-          repo init -u https://android.googlesource.com/kernel/manifest -b android14-6.1-lts --depth=1
+          # CORRECTED: Changed the manifest branch name
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=1
           # Sync the repositories
           repo sync -c --no-tags --no-clone-bundle -j$(nproc --all)
 
