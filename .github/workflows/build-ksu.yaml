@@ -57,7 +57,7 @@ jobs:
         
         # KernelSU integration
         echo 'source "KernelSU/Kconfig"' >> drivers/Kconfig
-        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/drivers/Makefile
+        echo 'obj-$(CONFIG_KSU) += KernelSU/' >> drivers/Makefile
         
         # Try SUSFS patch
         if [ -f "KernelSU/userspace/susfs4ksu/kernel_patches/susfs_for_ksu.patch" ]; then
