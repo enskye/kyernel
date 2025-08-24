@@ -50,8 +50,8 @@ jobs:
           # Clone the specified branch of the susfs4ksu repo
           git clone https://gitlab.com/simonpunk/susfs4ksu.git --depth=1 --branch gki-android14-6.1 /tmp/susfs4ksu
           
-          # Apply the patch from the cloned repo
-          git apply /tmp/susfs4ksu/patches/android14-6.1/*.patch
+          # Apply the patch from the cloned repo using the exact filename
+          git apply /tmp/susfs4ksu/patches/android14-6.1/susfs4ksu.patch
           echo "✅ susfs4ksu integrated successfully."
 
       - name: Apply GKI Android 14+ Fixes
