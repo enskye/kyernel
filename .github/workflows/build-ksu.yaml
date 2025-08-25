@@ -15,35 +15,29 @@ jobs:
             libssl-dev libncurses5-dev ccache curl wget unzip patch \
             python3 zip unzip rsync
 
-      - name: Clone kernel source
+      - name: Clone kernel and susfs4ksu
         run: |
-          rm -rf kernel_src
+          rm -rf kernel_src susfs4ksu
           git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
-
-      - name: Integrate KernelSU
-        run: |
-          cd kernel_src
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
-
-      - name: Clone susfs4ksu
-        run: |
-          rm -rf susfs4ksu
           git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
-      - name: Apply susfs4ksu patches
+      - name: Integrate KernelSU, apply patches, enable configs, build
         run: |
+          # Go to kernel source
           cd kernel_src
+
+          # KernelSU official integration
+          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
+
+          # Apply patches (paths relative to workspace)
           patch -p1 < ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch
           patch -p1 < ../susfs4ksu/10_enable_susfs_for_ksu.patch
 
-      - name: Enable configs
-        run: |
-          echo "CONFIG_KSU=y" >> kernel_src/common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> kernel_src/common/arch/arm64/configs/gki_defconfig
+          # Enable configs
+          echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig
 
-      - name: Build kernel with Bazel
-        run: |
-          cd kernel_src
+          # Build kernel with Bazel
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Upload artifacts
