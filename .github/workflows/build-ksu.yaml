@@ -20,11 +20,19 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex curl libssl-dev python3 rsync unzip wget git ccache libncurses5-dev patch zip
+          sudo apt-get install -y bc bison build-essential flex curl libssl-dev python3 rsync unzip wget git ccache libncurses5-dev patch zip repo
 
       - name: Clone kernel source
         run: |
           git clone --depth 1 --branch android14-6.1-lts https://android.googlesource.com/kernel/common $KERNEL_ROOT
+
+      - name: Clone SUSFS4KSU
+        run: |
+          git clone --depth 1 https://github.com/tiann/susfs4ksu.git
+
+      - name: Remove recommended exports (GKI2 fix)
+        run: |
+          rm -f $KERNEL_ROOT/common/android/abi_gki_protected_exports_*
 
       - name: Set up KernelSU
         run: |
@@ -35,6 +43,8 @@ jobs:
         run: |
           cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch $KERNEL_ROOT/KernelSU/
           cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-android14-6.1.patch $KERNEL_ROOT/
+          cp ./susfs4ksu/kernel_patches/fs/susfs.c $KERNEL_ROOT/fs/
+          cp ./susfs4ksu/kernel_patches/include/linux/susfs.h $KERNEL_ROOT/include/linux/
           cd $KERNEL_ROOT/KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
           cd $KERNEL_ROOT && patch -p1 < 50_add_susfs_in_kernel-android14-6.1.patch || echo "Check failed patches manually"
 
