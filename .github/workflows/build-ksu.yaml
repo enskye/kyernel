@@ -32,10 +32,17 @@ jobs:
           ls -l susfs4ksu
 
       - name: Apply susfs4ksu patches
-        working-directory: kernel_src
         run: |
-          patch -p1 < ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch
-          patch -p1 < ../susfs4ksu/10_enable_susfs_for_ksu.patch
+          SUSFS_DIR="${GITHUB_WORKSPACE}/susfs4ksu"
+          KERNEL_DIR="${GITHUB_WORKSPACE}/kernel_src"
+
+          # Verify patches exist
+          ls -l "$SUSFS_DIR/50_add_susfs_in_gki-android14-6.1.patch"
+          ls -l "$SUSFS_DIR/10_enable_susfs_for_ksu.patch"
+
+          # Apply patches
+          patch -p1 -d "$KERNEL_DIR" < "$SUSFS_DIR/50_add_susfs_in_gki-android14-6.1.patch"
+          patch -p1 -d "$KERNEL_DIR" < "$SUSFS_DIR/10_enable_susfs_for_ksu.patch"
 
       - name: Enable configs
         working-directory: kernel_src
