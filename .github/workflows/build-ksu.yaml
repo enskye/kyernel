@@ -22,7 +22,8 @@ jobs:
 
       - name: Integrate KernelSU
         run: |
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -C kernel_src
+          cd kernel_src
+          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
 
       - name: Clone susfs4ksu
         run: |
@@ -41,6 +42,7 @@ jobs:
 
       - name: Build kernel with Bazel
         run: |
+          cd kernel_src
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Upload artifacts
