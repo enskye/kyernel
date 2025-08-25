@@ -11,7 +11,7 @@ jobs:
     - name: Setup environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc cpio rsync python3
+        sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 libncurses-dev lib32ncurses-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc cpio rsync python3
         curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/bazel-archive-keyring.gpg > /dev/null
         echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
         sudo apt-get update && sudo apt-get install -y bazel
@@ -46,18 +46,16 @@ jobs:
         cd android-kernel
         cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
         cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch common/ || cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch common/50_add_susfs_in_kernel.patch
-        cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/
-        cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        if [ -d "./susfs4ksu/kernel_patches/fs" ]; then cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/; fi
+        if [ -d "./susfs4ksu/kernel_patches/include/linux" ]; then cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/; fi
         cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
         cd ../common && patch -p1 < 50_add_susfs_in_kernel.patch
         
-    - name: Remove GKI exports and configure
+    - name: Configure defconfig
       run: |
         cd android-kernel
         rm -f common/android/abi_gki_protected_exports_*
-        cd common
-        bazel run //common:kernel_aarch64_config
-        cat >> .config << 'EOF'
+        cat >> common/arch/arm64/configs/gki_defconfig << 'EOF'
         CONFIG_KSU=y
         CONFIG_KSU_SUSFS=y
         CONFIG_KSU_SUSFS_SUS_MOUNT=n
@@ -65,7 +63,6 @@ jobs:
         CONFIG_HAVE_KPROBES=y
         CONFIG_KPROBE_EVENTS=y
         EOF
-        make olddefconfig
         
     - name: Build kernel
       run: |
