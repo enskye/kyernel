@@ -32,8 +32,9 @@ jobs:
 
       - name: Apply susfs4ksu patches
         run: |
-          patch -p1 -d kernel_src < susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch
-          patch -p1 -d kernel_src < susfs4ksu/10_enable_susfs_for_ksu.patch
+          cd kernel_src
+          patch -p1 < ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch
+          patch -p1 < ../susfs4ksu/10_enable_susfs_for_ksu.patch
 
       - name: Enable configs
         run: |
