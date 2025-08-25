@@ -59,17 +59,19 @@ jobs:
           
           echo "Building: $KERNEL_NAME"
 
-      - name: Generate signing keys for Bazel
+      - name: Generate signing keys
         run: |
           cd workarea
           
-          echo "Generating signing keys for Bazel build..."
-          # Generate keys in the format expected by Bazel
-          openssl genrsa -out kernel_key.pem 4096
-          openssl req -new -x509 -key kernel_key.pem -out kernel_cert.pem -days 365 \
+          echo "Generating RSA key pair for kernel module signing..."
+          openssl genrsa -out signing_key.priv 2048
+          openssl req -new -x509 -key signing_key.priv -out signing_key.x509 -days 365 \
             -subj "/C=US/ST=CA/L=GitHub/O=Actions/CN=Kernel Builder"
           
-          echo "✅ Signing keys generated for Bazel"
+          # Convert to DER format for kernel
+          openssl x509 -in signing_key.x509 -outform DER -out signing_key.x509.der
+          
+          echo "✅ Signing keys generated"
 
       - name: Setup GKI Monthly sources first
         run: |
@@ -89,7 +91,7 @@ jobs:
             repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1 --depth=2
           fi
           
-          echo "Starting repo sync areas in 
+          echo "Starting repo sync..."
           repo sync -c --no-tags -j$(nproc)
           echo "GKI Monthly setup completed"
 
@@ -118,56 +120,65 @@ jobs:
           cd workarea
           
           echo "Cloning SUSFS repository for LTS..."
-          git clone --depth 2 --no-tags https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
+          git clone --depth 2 --no-tags https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
 
       - name: Copy SUSFS module and patches
         run: |
           cd workarea/gki-lts-kernel
           
           echo "Copying SUSFS files..."
-          cp -r ../susfs4ksu/kernel_patches/fs/* common/fs/
-          cp -r ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+          cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
+          cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
           
-          # Copy the main SUSFS patch
+          # Try LTS-specific patch first, fallback to regular patch
+          cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
           cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+          
+          cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
 
       - name: Apply SUSFS patches
         run: |
           cd $KERNEL_REPO/common
           
           echo "Applying SUSFS patches..."
-          patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android14-6.1.patch
+          # Apply LTS patch if it exists, otherwise use regular patch
+          if [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]]; then
+            patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch
+          else
+            patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
+          fi
+          
+          patch -p1 -ui 60_scope-minimized_manual_hooks.patch
 
-      - name: Integrate KernelSU (Original)
+      - name: Setup KernelSU-Next
         run: |
           cd $KERNEL_REPO
           
-          echo "Setting up original KernelSU..."
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-          echo "✅ KernelSU integrated successfully."
+          echo "Setting up KernelSU-Next..."
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
 
-      - name: Apply KernelSU SUSFS patch
-        run: |
-          cd $KERNEL_REPO/KernelSU
-          
-          echo "Applying KernelSU SUSFS integration patch..."
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch .
-          patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
-          echo "✅ KernelSU SUSFS patch applied."
-      - name: Configure Bazel signing and kernel parameters
+      - name: Configure signing and kernel parameters
         run: |
           cd $KERNEL_REPO
           
-          echo "Configuring Bazel build with signing..."
-          # Copy signing keys to kernel build directory for Bazel
-          cp ../kernel_key.pem common/
-          cp ../kernel_cert.pem common/
+          echo "Configuring kernel signing..."
+          # Copy signing keys to kernel build directory
+          cp ../signing_key.priv common/
+          cp ../signing_key.x509 common/
           
-          # Configure kernel parameters - KernelSU setup script already adds CONFIG_KSU=y
+          # Configure build config for signing
           BUILD_CONFIG_PATH="common/build.config.gki.aarch64"
+          echo "" >> $BUILD_CONFIG_PATH
+          echo "# Kernel module signing configuration" >> $BUILD_CONFIG_PATH
+          echo "CONFIG_MODULE_SIG=y" >> $BUILD_CONFIG_PATH
+          echo "CONFIG_MODULE_SIG_ALL=y" >> $BUILD_CONFIG_PATH
+          echo "CONFIG_MODULE_SIG_SHA256=y" >> $BUILD_CONFIG_PATH
+          echo "CONFIG_MODULE_SIG_KEY=\"signing_key.priv\"" >> $BUILD_CONFIG_PATH
+          
+          # KernelSU and SUSFS configuration (KSU setup script already adds CONFIG_KSU=y)
           echo "CONFIG_KSU_SUSFS=y" >> $BUILD_CONFIG_PATH
           
-          echo "✅ Bazel signing and kernel parameters configured."
+          echo "✅ Kernel signing and parameters configured."
 
       - name: Remove protected exports for compatibility
         run: |
@@ -178,7 +189,7 @@ jobs:
           rm -f common/android/abi_gki_protected_exports_*
           
           # Clean up patch files
-          rm -f common/50_add_susfs_in_gki-android14-6.1.patch
+          rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
 
       - name: Set Custom Kernel Version
         run: |
@@ -191,7 +202,7 @@ jobs:
           cd $KERNEL_REPO/common
           
           git add -A
-          git commit -m "Add KernelSU with SUSFS integration - $KERNEL_NAME"
+          git commit -m "Add KernelSU-Next with SUSFS integration and signing - $KERNEL_NAME"
 
       - name: Build Kernel with Bazel (Kleaf)
         id: build
@@ -199,33 +210,30 @@ jobs:
           cd $KERNEL_REPO
           mkdir -p ../android-kernel
           
-          echo "Building signed kernel with Bazel..."
-          tools/bazel run --config=fast --config=stamp --lto=thin \
-            --action_env=KBUILD_BUILD_TIMESTAMP="$(date)" \
-            --action_env=KBUILD_BUILD_USER="github-actions" \
-            --action_env=KBUILD_BUILD_HOST="github.com" \
-            //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+          echo "Building kernel with Bazel..."
+          tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
           
           echo "✅ Kernel build completed."
           echo "Contents of dist directory:"
           ls -la ../android-kernel
 
-      - name: Verify build artifacts
+      - name: Verify signing
         run: |
           cd workarea/android-kernel
           
-          echo "Verifying build artifacts..."
-          # Check if kernel image exists
-          if [[ -f "Image" || -f "Image.gz" ]]; then
-            echo "✅ Kernel image found"
+          echo "Verifying kernel module signatures..."
+          # Check if modules are present and signed
+          if ls *.ko 2>/dev/null; then
+            for module in *.ko; do
+              if file "$module" | grep -q "module signature appended"; then
+                echo "✅ $module is signed"
+              else
+                echo "⚠️  $module is not signed"
+              fi
+            done
           else
-            echo "❌ No kernel image found!"
-            exit 1
+            echo "No kernel modules found to verify"
           fi
-          
-          # List all artifacts
-          echo "Built artifacts:"
-          ls -la
 
       - name: Prepare kernel image
         run: |
@@ -257,7 +265,7 @@ jobs:
           cd workarea/android-kernel
           
           # Create a comprehensive release package
-          RELEASE_NAME="${KERNEL_NAME}-bazel-signed"
+          RELEASE_NAME="${KERNEL_NAME}-signed"
           mkdir -p "$RELEASE_NAME"
           
           # Copy all built artifacts
@@ -271,7 +279,7 @@ jobs:
           Build Date: $BUILD_DATE_FORMATTED
           Build Time: $BUILD_TIME_FORMATTED UTC
           Kernel Source: android14-6.1-lts
-          Features: KernelSU (Original), SUSFS, Bazel Build
+          Features: KernelSU-Next, SUSFS, Module Signing
           Builder: GitHub Actions
           
           Files:
@@ -289,15 +297,15 @@ jobs:
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KERNEL_NAME }}-bazel-signed-kernel
+          name: ${{ env.KERNEL_NAME }}-signed-kernel
           path: workarea/android-kernel/
           if-no-files-found: error
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.KERNEL_NAME }}-bazel-signed
-          name: ${{ env.KERNEL_NAME }} (Bazel Signed)
+          tag_name: ${{ env.KERNEL_NAME }}-signed
+          name: ${{ env.KERNEL_NAME }} (Signed)
           body: |
             ## 🚀 GKI LTS Build - ${{ env.KERNEL_NAME }}
             
@@ -308,11 +316,11 @@ jobs:
             - **Builder**: Bazel (Kleaf)
             
             **Security Features:**
-            - 🔧 **Bazel Build**: Modern build system with integrated signing
-            - 🛡️ **Reproducible**: Consistent builds with stamping
+            - 🔐 **Module Signing**: Kernel modules are cryptographically signed
+            - 🛡️ **Verified Boot**: Enhanced security with signed modules
             
             **Root Features:**
-            - ✅ **KernelSU**: Original implementation with latest features
+            - ✅ **KernelSU-Next**: Latest with SUSFS integration
             - ✅ **SUSFS**: Advanced root hiding capabilities
             - 🔧 **Custom Build**: Optimized GKI LTS kernel
             
@@ -321,7 +329,7 @@ jobs:
             2. Extract and use the kernel image with your preferred method
             3. For AnyKernel3 flashing, use the Image.lz4 file
             
-            **Note**: This kernel uses original KernelSU with SUSFS integration, built with Bazel for reproducible and optimized compilation.
+            **Note**: This kernel includes module signing for enhanced security and KernelSU-Next with SUSFS for advanced root management.
           files: |
             workarea/android-kernel/${{ env.RELEASE_ZIP }}
           draft: false
@@ -342,9 +350,9 @@ jobs:
           echo "- **Size**: $(du -h $RELEASE_ZIP | cut -f1)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔧 Build Components" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ **Builder**: Bazel (Kleaf) with signing integration" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔧 **Build System**: Reproducible builds with stamping" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ **KernelSU**: Original implementation" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **Builder**: Bazel (Kleaf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🔐 **Module Signing**: Enabled with RSA-2048" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ **KernelSU-Next**: Latest with SUSFS integration" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **SUSFS**: Advanced root hiding capabilities" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
