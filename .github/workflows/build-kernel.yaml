@@ -121,7 +121,7 @@ jobs:
           git clone --depth 2 --no-tags https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
 
       - name: Copy SUSFS module and patches
-        run: |you 
+        run: |
           cd workarea/gki-lts-kernel
           
           echo "Copying SUSFS files..."
