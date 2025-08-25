@@ -1,55 +1,59 @@
-name: Build GKI 14-6.1 with KernelSU + susfs4ksu
+name: Build GKI Kernel with KernelSU + SUSFS4KSU
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+    env:
+      DIST_DIR: ${{ github.workspace }}/kernel_dist
 
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git build-essential bc bison flex \
-            libssl-dev libncurses5-dev ccache curl wget unzip patch \
-            python3 zip unzip rsync
+    - name: Checkout workflow repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
 
-      - name: Clone kernel and susfs4ksu
-        run: |
-          git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
-          git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
+    - name: Install build dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison build-essential flex patch zip curl libssl-dev python3 rsync unzip git ccache libncurses5-dev
 
-      - name: Apply susfs4ksu patches
-        run: |
-          cd kernel_src
+    - name: Clone kernel source
+      run: git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
 
-          # Copy patches from susfs4ksu repo
-          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
-          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch .
+    - name: Clone SUSFS4KSU repository
+      run: git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
-          # Apply patches
-          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
-          patch -p1 < 10_enable_susfs_for_ksu.patch
+    - name: Setup KernelSU
+      run: |
+        cd kernel_src
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
 
-      - name: Integrate KernelSU
-        run: |
-          cd kernel_src
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
+    - name: Apply SUSFS4KSU patches
+      run: |
+        cd kernel_src
+        # Copy patches to kernel_src
+        cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
+        cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch .
+        # Apply patches
+        patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
+        patch -p1 < 10_enable_susfs_for_ksu.patch
 
-      - name: Enable configs
-        run: |
-          cd kernel_src
-          echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig
+    - name: Clean up recommended symbols (GKI2 fix)
+      run: |
+        cd kernel_src
+        rm common/android/abi_gki_protected_exports_*
 
-      - name: Build kernel with Bazel
-        run: |
-          cd kernel_src
-          LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
+    - name: Build kernel with Bazel
+      run: |
+        mkdir -p $DIST_DIR
+        cd kernel_src
+        tools/bazel run //common:kernel_aarch64_dist -- --destdir="$DIST_DIR"
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: gki-android14-6.1-ksu-susfs
-          path: kernel_src/out/dist/*
+    - name: Upload kernel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: gki-kernel-artifacts
+        path: $DIST_DIR/
