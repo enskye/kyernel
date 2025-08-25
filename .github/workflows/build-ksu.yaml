@@ -15,31 +15,25 @@ jobs:
             libssl-dev libncurses5-dev ccache curl wget unzip patch \
             python3 zip unzip rsync
 
-      - name: Clone kernel source and susfs4ksu
+      - name: Clone kernel and susfs4ksu
         run: |
           git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
           git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
-      - name: Integrate KernelSU, apply patches, enable configs, build
+      - name: Integrate KernelSU and apply patches
         run: |
-          # Define patch paths
-          PATCH1="${GITHUB_WORKSPACE}/susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch"
-          PATCH2="${GITHUB_WORKSPACE}/susfs4ksu/kernel_patches/10_enable_susfs_for_ksu.patch"
-
-          # Verify patch files exist
-          echo "Checking patches..."
-          ls -l "$PATCH1"
-          ls -l "$PATCH2"
-
-          # Go to kernel source
           cd kernel_src
 
           # KernelSU official integration
           curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
 
+          # Copy patch files into kernel_src
+          cp ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch .
+          cp ../susfs4ksu/kernel_patches/10_enable_susfs_for_ksu.patch .
+
           # Apply patches
-          patch -p1 < "$PATCH1"
-          patch -p1 < "$PATCH2"
+          patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
+          patch -p1 < 10_enable_susfs_for_ksu.patch
 
           # Enable configs
           echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
