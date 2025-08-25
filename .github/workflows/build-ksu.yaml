@@ -1,0 +1,195 @@
+name: Build KernelSU-Next with SUSFS and AnyKernel3 (LTS)
+
+on:
+  workflow_dispatch:
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  KERNEL_TYPE: lts
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Maximize build space
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 512
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+        remove-codeql: 'true'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git curl rsync build-essential bc bison flex libssl-dev libelf-dev lz4
+        mkdir -p ~/.bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+        chmod a+x ~/.bin/repo
+        echo "$HOME/.bin" >> $GITHUB_PATH
+
+    - name: Set up Git
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git config --global init.defaultBranch main
+
+    - name: Create workspace and get build info
+      run: |
+        mkdir -p workarea
+        cd workarea
+        BUILD_DATE=$(date +"%Y%m%d")
+        BUILD_TIME=$(date +"%H%M")
+        KERNEL_NAME="kyernel-lts-${BUILD_DATE}-${BUILD_TIME}"
+        echo "BUILD_DATE_FORMATTED=$(date +"%Y-%m-%d")" >> $GITHUB_ENV
+        echo "BUILD_TIME_FORMATTED=$(date +"%H:%M")" >> $GITHUB_ENV
+        echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
+
+    - name: Clone repositories (force sync)
+      run: |
+        cd workarea
+        rm -rf susfs4ksu AnyKernel3
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1
+        git clone https://github.com/enskye/AnyKernel3.git
+
+    - name: Setup LTS kernel sources (force sync)
+      run: |
+        cd workarea
+        rm -rf gki-lts-kernel
+        mkdir -p gki-lts-kernel
+        cd gki-lts-kernel
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
+        repo sync -c --no-tags --force-sync --no-repo-verify -j$(nproc)
+        
+        # Handle missing components
+        [[ ! -d "kernel/configs" ]] && { mkdir -p kernel/configs; git clone --depth=1 https://android.googlesource.com/kernel/configs kernel/configs; }
+        [[ ! -d "common-modules/virtual-device" ]] && repo sync common-modules/virtual-device 2>/dev/null || true
+        
+        ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+
+    - name: Create working directory and apply patches
+      run: |
+        cd workarea
+        rm -rf gki-14-lts
+        cp -r gki-lts-kernel gki-14-lts
+        cd gki-14-lts
+        
+        # Copy SUSFS files
+        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        # cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        # cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+
+    - name: Apply patches and setup KernelSU
+      run: |
+        cd workarea/gki-14-lts/common
+        
+        # Apply SUSFS patches
+        # [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]] && \
+        # patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch || \
+        patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
+        # patch -p1 -ui 60_scope-minimized_manual_hooks.patch
+        
+        cd ..
+        
+        # Setup KernelSU
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        
+        # Remove protected exports and set version
+        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
+        rm -f common/android/abi_gki_protected_exports_*
+        rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
+        echo 'echo "-kyernel"' > common/scripts/setlocalversion
+        
+        # Commit changes
+        cd common
+        git add -A
+        git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
+
+    - name: Setup signing keys for Bazel
+      run: |
+        cd workarea/gki-14-lts
+        mkdir -p signing
+        
+        if [[ -n "${{ secrets.KERNEL_SIGNING_KEY }}" && -n "${{ secrets.KERNEL_SIGNING_CERT }}" ]]; then
+          echo "${{ secrets.KERNEL_SIGNING_KEY }}" > signing/kernel_key.pem
+          echo "${{ secrets.KERNEL_SIGNING_CERT }}" > signing/kernel_cert.pem
+          
+          # Quick validation
+          openssl rsa -in signing/kernel_key.pem -check -noout || exit 1
+          openssl x509 -in signing/kernel_cert.pem -text -noout >/dev/null || exit 1
+        else
+          openssl genrsa -out signing/kernel_key.pem 4096
+          openssl req -new -x509 -key signing/kernel_key.pem -out signing/kernel_cert.pem -days 365 -subj "/C=US/ST=Dev/L=Build/O=Kyernel/CN=kyernel-lts"
+        fi
+        
+        echo "KBUILD_SIGN_KEY=$(pwd)/signing/kernel_key.pem" >> $GITHUB_ENV
+        echo "KBUILD_SIGN_CERT=$(pwd)/signing/kernel_cert.pem" >> $GITHUB_ENV
+        echo "KBUILD_SIGN_PIN=" >> $GITHUB_ENV
+
+    - name: Build kernel
+      run: |
+        cd workarea/gki-14-lts
+        
+        # Fallback build if kernel/configs missing
+        if [[ ! -d "kernel/configs" ]]; then
+          tools/bazel build --config=fast --config=stamp --lto=thin //common:kernel_aarch64
+          mkdir -p ../android-kernel
+          find bazel-bin -name "Image*" -exec cp {} ../android-kernel/ \;
+        else
+          tools/bazel run --config=fast --config=stamp --lto=thin //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        fi
+
+    - name: Prepare kernel image
+      run: |
+        cd workarea/android-kernel
+        
+        if [[ -f "Image" ]]; then
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        elif [[ -f "Image.gz" ]]; then
+          gunzip Image.gz
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        else
+          echo "❌ No kernel image found!"
+          exit 1
+        fi
+        
+        echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
+
+    - name: Create AnyKernel3 package
+      run: |
+        cd workarea/AnyKernel3
+        cp ../android-kernel/$KERNEL_IMAGE .
+        ZIP_NAME="${KERNEL_NAME}.zip"
+        zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" "LICENSE"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.KERNEL_NAME }}
+        name: ${{ env.KERNEL_NAME }}
+        body: |
+          ## 🚀 LTS Kernel Build - ${{ env.KERNEL_NAME }}
+          
+          **Build Information:**
+          - **Kernel Type**: LTS (Long Term Support)
+          - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
+          - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
+          
+          **Components:**
+          - ✅ **KernelSU-Next**: Latest with SUSFS integration
+          - ✅ **SUSFS**: Advanced root hiding capabilities  
+          - ✅ **AnyKernel3**: Universal flashing support
+
+    - name: Upload raw kernel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.KERNEL_NAME }}-raw-files
+        path: workarea/android-kernel/
+        retention-days: 7
