@@ -1,4 +1,4 @@
-name: Build KernelSU with SUSFS (LTS)
+name: Build KernelSU-Next with SUSFS and AnyKernel3 (LTS)
 
 on:
   workflow_dispatch:
@@ -118,9 +118,6 @@ jobs:
         echo "CONFIG_SUSFS_HIDE_PROCFS=y" >> arch/arm64/configs/gki_defconfig
         echo "CONFIG_SUSFS_HIDE_KSU_SUSFS_PROC=y" >> arch/arm64/configs/gki_defconfig
 
-        # Regenerate config
-        make ARCH=arm64 O=out gki_defconfig
-
     - name: Setup signing keys for Bazel
       run: |
         cd workarea/gki-14-lts
@@ -196,6 +193,8 @@ jobs:
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
           - ✅ **SUSFS**: Advanced root hiding capabilities  
           - ✅ **AnyKernel3**: Universal flashing support
+      files: |
+        workarea/${{ env.KERNEL_NAME }}.zip
 
     - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
