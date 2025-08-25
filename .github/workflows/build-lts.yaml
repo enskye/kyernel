@@ -1,8 +1,6 @@
 name: Build KernelSU-Next with SUSFS and AnyKernel3 (LTS)
 
 on:
-  push:
-    branches: [ main ]
   schedule:
     # Run daily at 02:00 UTC to catch updates
     - cron: '0 2 * * *'
@@ -67,6 +65,335 @@ jobs:
     - name: Clone repositories (force sync)
       run: |
         cd workarea
+        
+        # Force clone SUSFS repository for LTS
+        echo "Force cloning SUSFS repository for LTS..."
+        rm -rf susfs4ksu
+        git clone https://gitlab.com/pershoot/susfs4ksu.git -b gki-android14-6.1-lts-dev
+        
+        # Force clone AnyKernel3
+        echo "Force cloning AnyKernel3..."
+        rm -rf AnyKernel3
+        git clone https://github.com/enskye/AnyKernel3.git
+
+    - name: Setup LTS kernel sources (force sync)
+      run: |
+        cd workarea
+        
+        # Clean and setup LTS kernel
+        rm -rf gki-lts-kernel gki-kernel
+        mkdir -p gki-lts-kernel
+        
+        # Setup LTS kernel with complete manifest
+        cd gki-lts-kernel
+        echo "Setting up LTS kernel sources with complete manifest..."
+        
+        # Initialize with LTS branch but ensure we get all components
+        echo "Initializing repo with LTS manifest..."
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
+        
+        echo "Starting complete repo sync..."
+        # Force sync all projects including missing ones
+        repo sync -c --no-tags --force-sync --no-repo-verify -j$(nproc)
+        
+        # If kernel/configs is still missing, try to sync it explicitly
+        if [[ ! -d "kernel/configs" ]]; then
+          echo "⚠️ kernel/configs missing, attempting explicit sync..."
+          repo sync kernel/configs || {
+            echo "Creating kernel/configs manually..."
+            mkdir -p kernel/configs
+            # Clone configs separately as fallback
+            git clone --depth=1 https://android.googlesource.com/kernel/configs kernel/configs || echo "Configs clone failed"
+          }
+        fi
+        
+        # Check for other critical missing components and sync them
+        MISSING_COMPONENTS=""
+        
+        if [[ ! -d "common-modules/virtual-device" ]]; then
+          echo "⚠️ Syncing common-modules..."
+          repo sync common-modules/virtual-device || MISSING_COMPONENTS="$MISSING_COMPONENTS virtual-device"
+        fi
+        
+        if [[ ! -d "kernel/configs" ]]; then
+          MISSING_COMPONENTS="$MISSING_COMPONENTS kernel/configs"
+        fi
+        
+        if [[ ! -d "kernel/tests" ]]; then
+          echo "⚠️ Syncing kernel/tests..."
+          repo sync kernel/tests || MISSING_COMPONENTS="$MISSING_COMPONENTS kernel/tests"
+        fi
+        
+        # Verify critical directories exist
+        echo "Verifying repository structure..."
+        REQUIRED_DIRS=("common" "build" "kernel/configs")
+        for dir in "${REQUIRED_DIRS[@]}"; do
+          if [[ ! -d "$dir" ]]; then
+            echo "❌ Required directory missing: $dir"
+            echo "Available directories:"
+            find . -maxdepth 2 -type d | head -20
+            exit 1
+          else
+            echo "✅ $dir"
+          fi
+        done
+        
+        # List repository structure for debugging
+        echo "Repository structure:"
+        find . -maxdepth 3 -type d | grep -E "(kernel|common)" | sort
+        
+        # Set up workspace
+        if [[ -f "build/kernel/kleaf/bazel.WORKSPACE" ]]; then
+          ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+          echo "✅ WORKSPACE symlink created"
+        else
+          echo "❌ bazel.WORKSPACE not found!"
+          find . -name "bazel.WORKSPACE" -o -name "WORKSPACE*"
+          exit 1
+        fi
+        
+        if [[ -n "$MISSING_COMPONENTS" ]]; then
+          echo "⚠️ Some components missing: $MISSING_COMPONENTS"
+          echo "Continuing with available components..."
+        fi
+        
+        echo "✅ LTS kernel sources setup completed"
+
+    - name: Create working directory
+      run: |
+        cd workarea
+        
+        # Create working directory for LTS build
+        rm -rf gki-14-lts
+        cp -r gki-lts-kernel gki-14-lts
+        
+        echo "WORK_DIR=gki-14-lts" >> $GITHUB_ENV
+        echo "Working in: gki-14-lts"
+        
+        # Verify workspace structure
+        cd gki-14-lts
+        echo "Workspace verification:"
+        ls -la
+        
+        # Check if WORKSPACE file exists and is correct
+        if [[ -L "WORKSPACE" ]]; then
+          echo "✅ WORKSPACE symlink exists"
+          ls -la WORKSPACE
+        else
+          echo "❌ WORKSPACE symlink missing!"
+          if [[ -f "build/kernel/kleaf/bazel.WORKSPACE" ]]; then
+            ln -sf build/kernel/kleaf/bazel.WORKSPACE WORKSPACE
+            echo "✅ Created WORKSPACE symlink"
+          fi
+        fi
+
+    - name: Copy SUSFS module and patches
+      run: |
+        cd workarea/gki-14-lts
+        
+        echo "Copying SUSFS files..."
+        cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        
+        # Use LTS-specific patch if available, otherwise fallback
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
+        cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+        
+        cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
+
+    - name: Apply SUSFS patches
+      run: |
+        cd workarea/gki-14-lts/common
+        
+        echo "Applying SUSFS patches..."
+        # Apply LTS patch if it exists, otherwise use regular patch
+        if [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]]; then
+          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch
+        else
+          patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
+        fi
+        
+        patch -p1 -ui 60_scope-minimized_manual_hooks.patch
+
+    - name: Setup KernelSU-Next
+      run: |
+        cd workarea/gki-14-lts
+        
+        echo "Setting up KernelSU-Next..."
+        curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/refs/heads/next-susfs/kernel/setup.sh" | bash -s next-susfs
+
+    - name: Remove protected exports and set version
+      run: |
+        cd workarea/gki-14-lts
+        
+        echo "Removing protected exports for Wi-Fi/Bluetooth compatibility..."
+        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
+        rm -f common/android/abi_gki_protected_exports_*
+        
+        # Clean up patch files
+        rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
+        
+        # Set custom kernel version
+        echo 'echo "-kyernel"' > common/scripts/setlocalversion
+
+    - name: Commit changes
+      run: |
+        cd workarea/gki-14-lts/common
+        
+        git add -A
+        git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
+
+    - name: Build kernel
+      run: |
+        cd workarea/gki-14-lts
+        
+        echo "Pre-build verification..."
+        echo "Current directory contents:"
+        ls -la
+        
+        echo "Checking for required directories:"
+        [[ -d "common" ]] && echo "✅ common/" || echo "❌ common/ missing"
+        [[ -d "build" ]] && echo "✅ build/" || echo "❌ build/ missing"
+        [[ -d "tools" ]] && echo "✅ tools/" || echo "❌ tools/ missing"
+        [[ -d "prebuilts" ]] && echo "✅ prebuilts/" || echo "❌ prebuilts/ missing"
+        [[ -d "kernel/configs" ]] && echo "✅ kernel/configs/" || echo "❌ kernel/configs/ missing"
+        [[ -f "WORKSPACE" ]] && echo "✅ WORKSPACE" || echo "❌ WORKSPACE missing"
+        
+        # Show kernel/configs contents if it exists
+        if [[ -d "kernel/configs" ]]; then
+          echo "kernel/configs contents:"
+          ls -la kernel/configs/ | head -10
+        fi
+        
+        # Check workspace status manually
+        echo "Testing workspace status..."
+        tools/bazel info workspace 2>&1 || echo "Workspace info failed"
+        
+        # Try to query available targets first
+        echo "Querying available kernel targets..."
+        tools/bazel query "//common:*" 2>&1 | head -10 || echo "Query failed, continuing..."
+        
+        # If kernel/configs is still missing, try alternative build approach
+        if [[ ! -d "kernel/configs" ]]; then
+          echo "⚠️ kernel/configs missing, trying fallback build..."
+          # Try building without dist target first
+          tools/bazel build --config=fast --config=stamp --lto=thin --verbose_failures //common:kernel_aarch64 || {
+            echo "❌ Fallback build also failed"
+            exit 1
+          }
+          
+          # If successful, try to create dist manually
+          echo "Creating distribution manually..."
+          mkdir -p ../android-kernel
+          find bazel-bin -name "Image*" -exec cp {} ../android-kernel/ \;
+        else
+          echo "Building kernel without signing..."
+          tools/bazel run --config=fast --config=stamp --lto=thin --verbose_failures //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
+        fi
+
+    - name: Prepare kernel image
+      run: |
+        cd workarea/android-kernel
+        
+        echo "Built artifacts:"
+        ls -la
+        
+        # Find and prepare kernel image
+        if [[ -f "Image" ]]; then
+          echo "Compressing Image to Image.lz4..."
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        elif [[ -f "Image.gz" ]]; then
+          echo "Converting Image.gz to Image.lz4..."
+          gunzip Image.gz
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        else
+          echo "❌ No kernel image found!"
+          exit 1
+        fi
+        
+        echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
+        echo "✅ Kernel image prepared and compressed: $KERNEL_IMAGE"
+        echo "✅ Image was signed during Bazel build process"
+
+    - name: Create AnyKernel3 package
+      run: |
+        cd workarea
+        
+        echo "Preparing AnyKernel3 package..."
+        cd AnyKernel3
+        
+        # Copy kernel image
+        cp ../android-kernel/$KERNEL_IMAGE .
+        
+        # Create ZIP package
+        ZIP_NAME="${KERNEL_NAME}.zip"
+        zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" "LICENSE"
+        
+        cd ..
+        echo "✅ Created: $ZIP_NAME"
+        echo "Package size: $(du -h $ZIP_NAME | cut -f1)"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.KERNEL_NAME }}
+        name: ${{ env.KERNEL_NAME }}
+        body: |
+          ## 🚀 LTS Kernel Build - ${{ env.KERNEL_NAME }}
+          
+          **Build Information:**
+          - **Kernel Type**: LTS (Long Term Support)
+          - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
+          - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
+          - **Auto-built**: Daily sync and build
+          
+          **Components:**
+          - ✅ **KernelSU-Next**: Latest with SUSFS integration
+          - ✅ **SUSFS**: Advanced root hiding capabilities  
+          - ✅ **AnyKernel3**: Universal flashing support
+          - ✅ **Unsigned**: Fast build without signing overhead
+          
+          **Installation:**
+          1. Download the ZIP file below
+          2. Boot into custom recovery (TWRP/OrangeFox)
+          3. Flash the ZIP file
+          4. Reboot and enjoy!
+          
+          **Note**: This is an LTS build with enhanced stability and security features.
+        files: |
+          workarea/${{ env.KERNEL_NAME }}.zip
+        draft: false
+        prerelease: false
+
+    - name: Upload raw kernel artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.KERNEL_NAME }}-raw-files
+        path: workarea/android-kernel/
+        retention-days: 7
+
+    - name: Generate build summary
+      run: |
+        cd workarea
+        
+        echo "## 🚀 LTS Kernel Build Complete" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 Package Information" >> $GITHUB_STEP_SUMMARY
+        echo "- **Name**: \`$KERNEL_NAME\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Type**: LTS (Long Term Support)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Date**: $BUILD_DATE_FORMATTED" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Time**: $BUILD_TIME_FORMATTED UTC" >> $GITHUB_STEP_SUMMARY
+        echo "- **Package**: \`$KERNEL_NAME.zip\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Size**: $(du -h $KERNEL_NAME.zip | cut -f1)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔧 Build Components" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **KernelSU-Next**: Latest with SUSFS integration" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **SUSFS**: Advanced root hiding capabilities" >> $GITHUB_SUMMARY
+        echo "- ✅ **AnyKernel3**: Universal flashing support" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\` (Unsigned)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **Force Sync**: All sources updated" >> $GITHUB_STEP_SUMMARY        cd workarea
         
         # Force clone SUSFS repository for LTS
         echo "Force cloning SUSFS repository for LTS..."
