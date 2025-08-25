@@ -1,61 +1,87 @@
-name: Build GKI Kernel with KernelSU & SUSFS4KSU
+name: Build GKI Kernel with KernelSU + SUSFS4KSU
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
-  build_kernel:
+  build:
     runs-on: ubuntu-latest
-    env:
-      KERNEL_ROOT: ${{ github.workspace }}/kernel_src
-      DIST_DIR: ${{ github.workspace }}/out
-
+    
     steps:
-      - name: Checkout workflow repo
-        uses: actions/checkout@v3
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential flex curl libssl-dev python3 rsync unzip wget git ccache libncurses5-dev patch zip repo
-
-      - name: Clone kernel source
-        run: |
-          git clone --depth 1 --branch android14-6.1-lts https://android.googlesource.com/kernel/common $KERNEL_ROOT
-
-      - name: Clone SUSFS4KSU
-        run: |
-          git clone --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
-
-      - name: Remove recommended exports (GKI2 fix)
-        run: |
-          rm -f $KERNEL_ROOT/common/android/abi_gki_protected_exports_*
-
-      - name: Set up KernelSU
-        run: |
-          cd $KERNEL_ROOT
-          curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-
-      - name: Apply SUSFS4KSU patches
-        run: |
-          cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch $KERNEL_ROOT/KernelSU/
-          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-android14-6.1.patch $KERNEL_ROOT/
-          cp ./susfs4ksu/kernel_patches/fs/susfs.c $KERNEL_ROOT/fs/
-          cp ./susfs4ksu/kernel_patches/include/linux/susfs.h $KERNEL_ROOT/include/linux/
-          cd $KERNEL_ROOT/KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
-          cd $KERNEL_ROOT && patch -p1 < 50_add_susfs_in_kernel-android14-6.1.patch || echo "Check failed patches manually"
-
-      - name: Build kernel with Bazel
-        run: |
-          export DIST_DIR=$DIST_DIR
-          cd $KERNEL_ROOT
-          tools/bazel run //common:kernel_aarch64_dist -- --destdir=$DIST_DIR
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: gki-kernel-artifacts
-          path: $DIST_DIR/**
+    - name: Setup environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 libncurses5 lib32ncurses5-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc cpio rsync python3
+        curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/bazel-archive-keyring.gpg > /dev/null
+        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
+        sudo apt-get update && sudo apt-get install -y bazel
+        
+    - name: Setup repo tool
+      run: |
+        mkdir -p ~/.bin
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
+        chmod a+rx ~/.bin/repo
+        echo ~/.bin >> $GITHUB_PATH
+        
+    - name: Clone kernel source
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        mkdir android-kernel && cd android-kernel
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
+        repo sync -j$(nproc)
+        
+    - name: Setup KernelSU
+      run: |
+        cd android-kernel
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        
+    - name: Setup SUSFS4KSU
+      run: |
+        cd android-kernel
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
+        
+    - name: Apply SUSFS patches
+      run: |
+        cd android-kernel
+        cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+        cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch common/ || cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch common/50_add_susfs_in_kernel.patch
+        cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/
+        cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+        cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
+        cd ../common && patch -p1 < 50_add_susfs_in_kernel.patch
+        
+    - name: Remove GKI exports and configure
+      run: |
+        cd android-kernel
+        rm -f common/android/abi_gki_protected_exports_*
+        cd common
+        bazel run //common:kernel_aarch64_config
+        cat >> .config << 'EOF'
+        CONFIG_KSU=y
+        CONFIG_KSU_SUSFS=y
+        CONFIG_KSU_SUSFS_SUS_MOUNT=n
+        CONFIG_KPROBES=y
+        CONFIG_HAVE_KPROBES=y
+        CONFIG_KPROBE_EVENTS=y
+        EOF
+        make olddefconfig
+        
+    - name: Build kernel
+      run: |
+        cd android-kernel
+        bazel build //common:kernel_aarch64_dist
+        
+    - name: Extract and upload artifacts
+      run: |
+        cd android-kernel
+        mkdir output
+        find bazel-bin -name "Image.gz" -exec cp {} output/ \;
+        find bazel-bin -name "*.dtb" -exec cp {} output/ \; || true
+        cp common/.config output/
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-build
+        path: android-kernel/output/*
