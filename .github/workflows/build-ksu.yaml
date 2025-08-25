@@ -20,18 +20,11 @@ jobs:
           git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
           git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
-      - name: Integrate KernelSU, copy and apply patches
+      - name: Apply susfs4ksu patches
         run: |
-          # List susfs4ksu to verify paths
-          echo "Listing susfs4ksu repo contents:"
-          ls -R susfs4ksu
-
           cd kernel_src
 
-          # KernelSU official integration
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -s main
-
-          # Copy patches into kernel_src
+          # Copy patches from susfs4ksu repo
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
           cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch .
 
@@ -39,11 +32,20 @@ jobs:
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
           patch -p1 < 10_enable_susfs_for_ksu.patch
 
-          # Enable configs
+      - name: Integrate KernelSU
+        run: |
+          cd kernel_src
+          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
+
+      - name: Enable configs
+        run: |
+          cd kernel_src
           echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig
 
-          # Build kernel with Bazel
+      - name: Build kernel with Bazel
+        run: |
+          cd kernel_src
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
       - name: Upload artifacts
