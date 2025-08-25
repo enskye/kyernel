@@ -28,7 +28,7 @@ jobs:
 
       - name: Clone SUSFS4KSU
         run: |
-          git clone --depth 1 https://github.com/tiann/susfs4ksu.git
+          git clone --depth 1 https://gitlab.com/simonpunk/susfs4ksu.git
 
       - name: Remove recommended exports (GKI2 fix)
         run: |
