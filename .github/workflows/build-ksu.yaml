@@ -15,43 +15,31 @@ jobs:
             libssl-dev libncurses5-dev ccache curl wget unzip patch \
             python3 zip unzip rsync
 
-      - name: Clone kernel source (force fresh)
+      - name: Clone kernel source
         run: |
           rm -rf kernel_src
-          git clone --depth=1 https://android.googlesource.com/kernel/common -b android14-6.1-lts kernel_src
+          git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
 
       - name: Integrate KernelSU
-        working-directory: kernel_src
         run: |
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
+          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -C kernel_src
 
       - name: Clone susfs4ksu
         run: |
           rm -rf susfs4ksu
-          git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
-          ls -l susfs4ksu
+          git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
       - name: Apply susfs4ksu patches
         run: |
-          SUSFS_DIR="${GITHUB_WORKSPACE}/susfs4ksu"
-          KERNEL_DIR="${GITHUB_WORKSPACE}/kernel_src"
-
-          # Verify patches exist
-          ls -l "$SUSFS_DIR/50_add_susfs_in_gki-android14-6.1.patch"
-          ls -l "$SUSFS_DIR/10_enable_susfs_for_ksu.patch"
-
-          # Apply patches
-          patch -p1 -d "$KERNEL_DIR" < "$SUSFS_DIR/50_add_susfs_in_gki-android14-6.1.patch"
-          patch -p1 -d "$KERNEL_DIR" < "$SUSFS_DIR/10_enable_susfs_for_ksu.patch"
+          patch -p1 -d kernel_src < susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch
+          patch -p1 -d kernel_src < susfs4ksu/10_enable_susfs_for_ksu.patch
 
       - name: Enable configs
-        working-directory: kernel_src
         run: |
-          echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU=y" >> kernel_src/common/arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS=y" >> kernel_src/common/arch/arm64/configs/gki_defconfig
 
-      - name: Build with Bazel
-        working-directory: kernel_src
+      - name: Build kernel with Bazel
         run: |
           LTO=thin BUILD_CONFIG=common/build.config.gki.aarch64 build/build.sh
 
