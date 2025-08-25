@@ -22,7 +22,7 @@ jobs:
 
       - name: Integrate KernelSU, copy and apply patches
         run: |
-          # Check contents of susfs4ksu to confirm patch locations
+          # List susfs4ksu to verify paths
           echo "Listing susfs4ksu repo contents:"
           ls -R susfs4ksu
 
@@ -32,8 +32,8 @@ jobs:
           curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
 
           # Copy patches into kernel_src
-          cp ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch .
-          cp ../susfs4ksu/kernel_patches/10_enable_susfs_for_ksu.patch .
+          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
+          cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch .
 
           # Apply patches
           patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
