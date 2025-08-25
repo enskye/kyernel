@@ -245,6 +245,56 @@ jobs:
         git add -A
         git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
 
+    - name: Setup signing keys for Bazel
+      run: |
+        cd workarea/gki-14-lts
+        
+        # Create signing keys directory
+        mkdir -p signing
+        
+        if [[ -n "${{ secrets.KERNEL_SIGNING_KEY }}" && -n "${{ secrets.KERNEL_SIGNING_CERT }}" ]]; then
+          echo "Setting up kernel signing keys from GitHub Secrets (raw format)..."
+          
+          # Write keys directly without base64 decoding
+          echo "${{ secrets.KERNEL_SIGNING_KEY }}" > signing/kernel_key.pem
+          echo "${{ secrets.KERNEL_SIGNING_CERT }}" > signing/kernel_cert.pem
+          
+          # Validate the key files
+          if openssl rsa -in signing/kernel_key.pem -check -noout 2>/dev/null; then
+            echo "✅ Private key validation passed"
+          else
+            echo "❌ Private key validation failed"
+            echo "🔧 Make sure KERNEL_SIGNING_KEY contains raw PEM content (not base64)"
+            exit 1
+          fi
+          
+          if openssl x509 -in signing/kernel_cert.pem -text -noout >/dev/null 2>&1; then
+            echo "✅ Certificate validation passed"
+          else
+            echo "❌ Certificate validation failed"
+            echo "🔧 Make sure KERNEL_SIGNING_CERT contains raw PEM content (not base64)"
+            exit 1
+          fi
+          
+        else
+          echo "No signing keys found in secrets, generating development keys..."
+          # Generate fresh keys for this build
+          openssl genrsa -out signing/kernel_key.pem 4096
+          openssl req -new -x509 -key signing/kernel_key.pem -out signing/kernel_cert.pem -days 365 -subj "/C=US/ST=Dev/L=Build/O=Kyernel/CN=kyernel-lts"
+          echo "⚠️ Using generated development keys. Add KERNEL_SIGNING_KEY and KERNEL_SIGNING_CERT secrets for production keys."
+        fi
+        
+        # Set up Bazel signing environment variables
+        echo "KBUILD_SIGN_KEY=$(pwd)/signing/kernel_key.pem" >> $GITHUB_ENV
+        echo "KBUILD_SIGN_CERT=$(pwd)/signing/kernel_cert.pem" >> $GITHUB_ENV
+        echo "KBUILD_SIGN_PIN=" >> $GITHUB_ENV
+        
+        echo "✅ Kernel signing configured for Bazel"
+        
+        # Show key info (without exposing the actual keys)
+        echo "Certificate info:"
+        openssl x509 -in signing/kernel_cert.pem -subject -issuer -dates -noout 2>/dev/null || echo "Cert info unavailable"
+
     - name: Build kernel
       run: |
         cd workarea/gki-14-lts
@@ -267,13 +317,16 @@ jobs:
           ls -la kernel/configs/ | head -10
         fi
         
+        # Verify signing setup
+        echo "Signing configuration:"
+        echo "KBUILD_SIGN_KEY: $KBUILD_SIGN_KEY"
+        echo "KBUILD_SIGN_CERT: $KBUILD_SIGN_CERT"
+        [[ -f "$KBUILD_SIGN_KEY" ]] && echo "✅ Signing key exists" || echo "❌ Signing key missing"
+        [[ -f "$KBUILD_SIGN_CERT" ]] && echo "✅ Signing cert exists" || echo "❌ Signing cert missing"
+        
         # Check workspace status manually
         echo "Testing workspace status..."
         tools/bazel info workspace 2>&1 || echo "Workspace info failed"
-        
-        # Try to query available targets first
-        echo "Querying available kernel targets..."
-        tools/bazel query "//common:*" 2>&1 | head -10 || echo "Query failed, continuing..."
         
         # If kernel/configs is still missing, try alternative build approach
         if [[ ! -d "kernel/configs" ]]; then
@@ -289,7 +342,7 @@ jobs:
           mkdir -p ../android-kernel
           find bazel-bin -name "Image*" -exec cp {} ../android-kernel/ \;
         else
-          echo "Building kernel without signing..."
+          echo "Building signed kernel with Bazel..."
           tools/bazel run --config=fast --config=stamp --lto=thin --verbose_failures //common:kernel_aarch64_dist -- --dist_dir=../android-kernel
         fi
 
@@ -355,7 +408,7 @@ jobs:
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
           - ✅ **SUSFS**: Advanced root hiding capabilities  
           - ✅ **AnyKernel3**: Universal flashing support
-          - ✅ **Unsigned**: Fast build without signing overhead
+          - ✅ **Signed**: Bazel-signed kernel images
           
           **Installation:**
           1. Download the ZIP file below
@@ -394,5 +447,5 @@ jobs:
         echo "- ✅ **KernelSU-Next**: Latest with SUSFS integration" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **SUSFS**: Advanced root hiding capabilities" >> $GITHUB_SUMMARY
         echo "- ✅ **AnyKernel3**: Universal flashing support" >> $GITHUB_STEP_SUMMARY
-        echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\` (Unsigned)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ **Kernel Image**: \`$KERNEL_IMAGE\` (Bazel-signed)" >> $GITHUB_STEP_SUMMARY
         echo "- ✅ **Force Sync**: All sources updated" >> $GITHUB_STEP_SUMMARY
