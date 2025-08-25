@@ -27,14 +27,15 @@ jobs:
 
       - name: Clone susfs4ksu
         run: |
-          rm -rf susfs
-          git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git susfs
+          rm -rf susfs4ksu
+          git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          ls -l susfs4ksu
 
       - name: Apply susfs4ksu patches
         working-directory: kernel_src
         run: |
-          patch -p1 < ../susfs/patches/50_add_susfs_in_gki-android14-6.1.patch
-          patch -p1 < ../susfs/patches/10_enable_susfs_for_ksu.patch
+          patch -p1 < ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch
+          patch -p1 < ../susfs4ksu/10_enable_susfs_for_ksu.patch
 
       - name: Enable configs
         working-directory: kernel_src
