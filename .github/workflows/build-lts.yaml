@@ -186,17 +186,6 @@ jobs:
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
           - ✅ **SUSFS**: Advanced root hiding capabilities  
           - ✅ **AnyKernel3**: Universal flashing support
-          - ✅ **Signed**: Bazel-signed kernel images
-          
-          **Installation:**
-          1. Download the ZIP file below
-          2. Boot into custom recovery (TWRP/OrangeFox)
-          3. Flash the ZIP file
-          4. Reboot and enjoy!
-        files: |
-          workarea/${{ env.KERNEL_NAME }}.zip
-        draft: false
-        prerelease: false
 
     - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
