@@ -20,14 +20,18 @@ jobs:
           git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
           git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
-      - name: Integrate KernelSU and apply patches
+      - name: Integrate KernelSU, copy and apply patches
         run: |
+          # Check contents of susfs4ksu to confirm patch locations
+          echo "Listing susfs4ksu repo contents:"
+          ls -R susfs4ksu
+
           cd kernel_src
 
           # KernelSU official integration
           curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
 
-          # Copy patch files into kernel_src
+          # Copy patches into kernel_src
           cp ../susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch .
           cp ../susfs4ksu/kernel_patches/10_enable_susfs_for_ksu.patch .
 
