@@ -29,7 +29,7 @@ jobs:
           cd kernel_src
 
           # KernelSU official integration
-          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash
+          curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -s main
 
           # Copy patches into kernel_src
           cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch .
