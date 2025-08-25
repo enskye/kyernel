@@ -15,20 +15,18 @@ jobs:
             libssl-dev libncurses5-dev ccache curl wget unzip patch \
             python3 zip unzip rsync
 
-      - name: Clone kernel and susfs4ksu
+      - name: Clone kernel source and susfs4ksu
         run: |
-          rm -rf kernel_src susfs4ksu
           git clone --depth=1 -b android14-6.1-lts https://android.googlesource.com/kernel/common kernel_src
           git clone --depth=1 -b gki-android14-6.1 https://gitlab.com/simonpunk/susfs4ksu.git
 
       - name: Integrate KernelSU, apply patches, enable configs, build
         run: |
-          # Define full path to susfs4ksu patches
-          SUSFS_DIR="${GITHUB_WORKSPACE}/susfs4ksu"
-          PATCH1="${SUSFS_DIR}/50_add_susfs_in_gki-android14-6.1.patch"
-          PATCH2="${SUSFS_DIR}/10_enable_susfs_for_ksu.patch"
+          # Define patch paths
+          PATCH1="${GITHUB_WORKSPACE}/susfs4ksu/50_add_susfs_in_gki-android14-6.1.patch"
+          PATCH2="${GITHUB_WORKSPACE}/susfs4ksu/kernel_patches/10_enable_susfs_for_ksu.patch"
 
-          # Check files exist
+          # Verify patch files exist
           echo "Checking patches..."
           ls -l "$PATCH1"
           ls -l "$PATCH2"
