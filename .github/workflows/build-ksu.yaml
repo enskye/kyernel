@@ -1,4 +1,4 @@
-name: Build KernelSU-Next with SUSFS and AnyKernel3 (LTS)
+name: Build KernelSU with SUSFS (LTS)
 
 on:
   workflow_dispatch:
@@ -80,19 +80,14 @@ jobs:
         # Copy SUSFS files
         cp -p ../susfs4ksu/kernel_patches/fs/* common/fs/
         cp -p ../susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-        # cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1-lts.patch common/ 2>/dev/null || \
         cp -p ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-        # cp -p ../susfs4ksu/kernel_patches/60_scope-minimized_manual_hooks.patch common/
 
     - name: Apply patches and setup KernelSU
       run: |
         cd workarea/gki-14-lts/common
         
-        # Apply SUSFS patches
-        # [[ -f "50_add_susfs_in_gki-android14-6.1-lts.patch" ]] && \
-        # patch -p1 -ui 50_add_susfs_in_gki-android14-6.1-lts.patch || \
+        # Apply SUSFS patch
         patch -p1 -ui 50_add_susfs_in_gki-android14-6.1.patch
-        # patch -p1 -ui 60_scope-minimized_manual_hooks.patch
         
         cd ..
         
@@ -102,13 +97,29 @@ jobs:
         # Remove protected exports and set version
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm -f common/android/abi_gki_protected_exports_*
-        rm -f common/50_add_susfs_in_gki-android14-6.1*.patch common/60_scope-minimized_manual_hooks.patch
+        rm -f common/50_add_susfs_in_gki-android14-6.1*.patch
         echo 'echo "-kyernel"' > common/scripts/setlocalversion
         
         # Commit changes
         cd common
         git add -A
         git commit -m "Add KernelSU-Next with SUSFS integration - $KERNEL_NAME"
+
+    - name: Enable SUSFS configs
+      run: |
+        cd workarea/gki-14-lts/common
+
+        # Core SUSFS support
+        echo "CONFIG_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+        echo "CONFIG_SUS_SU=y" >> arch/arm64/configs/gki_defconfig
+
+        # Optional hiding features
+        echo "CONFIG_SUSFS_HIDE_PROCFS=y" >> arch/arm64/configs/gki_defconfig
+        echo "CONFIG_SUSFS_HIDE_KSU_SUSFS_PROC=y" >> arch/arm64/configs/gki_defconfig
+
+        # Regenerate config
+        make ARCH=arm64 O=out gki_defconfig
 
     - name: Setup signing keys for Bazel
       run: |
@@ -135,7 +146,6 @@ jobs:
       run: |
         cd workarea/gki-14-lts
         
-        # Fallback build if kernel/configs missing
         if [[ ! -d "kernel/configs" ]]; then
           tools/bazel build --config=fast --config=stamp --lto=thin //common:kernel_aarch64
           mkdir -p ../android-kernel
