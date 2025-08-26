@@ -29,21 +29,7 @@ jobs:
       run: |
         cd android-kernel
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-        
-    - name: Set KernelSU versioning
-      run: |
-        cd android-kernel
-        git clone https://github.com/tiann/KernelSU.git -b main
-        cd KernelSU
-        BASE_VERSION=10200
-        KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
-        KSU_GIT_VERSION=$(git describe --abbrev=12 --tags --always 2>/dev/null || echo "v0.9.5-$KSU_VERSION")
-        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
-        echo "KSUGITVER=$KSU_GIT_VERSION" >> $GITHUB_ENV
-        echo "export KSU_GIT_VERSION=$KSU_GIT_VERSION" >> ../build_env.sh
-        echo "export KSUVER=$KSU_VERSION" >> ../build_env.sh
-        echo "KernelSU Version: $KSU_VERSION, Git Version: $KSU_GIT_VERSION"
-        
+                
     - name: Setup SUSFS4KSU and apply patches
       run: |
         cd android-kernel
