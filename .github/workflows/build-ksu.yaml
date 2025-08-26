@@ -28,18 +28,18 @@ jobs:
     - name: Integrate official KernelSU
       run: |
         cd android-kernel
+        
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
                 
     - name: Setup SUSFS4KSU and apply patches
       run: |
         cd android-kernel
+        
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
         
         # Apply SUSFS patches if available
-        if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
           cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
           cd KernelSU && patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch >/dev/null 2>&1 && patch -p1 < 10_enable_susfs_for_ksu.patch && echo "Applied KernelSU SUSFS patch" && cd ..
-        fi
         
         if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
           cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
@@ -49,11 +49,7 @@ jobs:
     - name: Configure and build kernel
       run: |
         cd android-kernel
-        
-        # Remove ABI dependencies and defconfig checks
-        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
-        rm -f common/android/abi_gki_protected_exports_*
-        sed -i 's/check_defconfig//' ./common/build.config.gki
+
         
         # Add KSU and SUSFS configs
         echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -77,7 +73,7 @@ jobs:
         # Build kernel
         [ -f build_env.sh ] && source build_env.sh
         export KSU_GIT_VERSION="${{ env.KSUGITVER }}" KSUVER="${{ env.KSUVER }}"
-        bazel build //common:kernel_aarch64_dist
+        bazel build //common:kernel_aarch64_dist --config=fast --lto=thin
         
     - name: Prepare artifacts
       run: |
