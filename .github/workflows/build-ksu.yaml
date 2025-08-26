@@ -27,7 +27,7 @@ jobs:
         
     - name: Integrate official KernelSU
       run: |
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash - main
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         
     - name: Set KernelSU versioning
       run: |
