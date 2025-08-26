@@ -110,6 +110,9 @@ jobs:
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm -f common/android/abi_gki_protected_exports_*
         
+        # Add basic KSU config first
+        echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
+        
         # Add KSU and SUSFS configs directly to defconfig
         echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -118,7 +121,7 @@ jobs:
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "# CONFIG_KSU_SUSFS_SUS_OVERLAYFS is not set" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -126,6 +129,17 @@ jobs:
         echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        
+        # Add required kprobes configs if missing
+        if ! grep -q "CONFIG_KPROBES=y" ./common/arch/arm64/configs/gki_defconfig; then
+          echo "CONFIG_KPROBES=y" >> ./common/arch/arm64/configs/gki_defconfig
+        fi
+        if ! grep -q "CONFIG_HAVE_KPROBES=y" ./common/arch/arm64/configs/gki_defconfig; then
+          echo "CONFIG_HAVE_KPROBES=y" >> ./common/arch/arm64/configs/gki_defconfig
+        fi
+        if ! grep -q "CONFIG_KPROBE_EVENTS=y" ./common/arch/arm64/configs/gki_defconfig; then
+          echo "CONFIG_KPROBE_EVENTS=y" >> ./common/arch/arm64/configs/gki_defconfig
+        fi
         
     - name: Build kernel
       run: |
