@@ -64,6 +64,8 @@ jobs:
         patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
         cd ../common
         patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch
+        cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+        cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
         
         
     - name: Configure kernel options
