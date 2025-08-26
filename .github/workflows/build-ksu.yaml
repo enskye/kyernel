@@ -99,11 +99,9 @@ jobs:
         rm -f common/android/abi_gki_protected_exports_*
         sed -i 's/check_defconfig//' common/build.config.gki
         
-        # Set KernelSU version for build
-        export KSU_GIT_VERSION="${{ env.KSUVER }}"
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
-        tools/bazel build //common:kernel_aarch64_dist
+        tools/bazel build //common:kernel_aarch64_dist --kbuild_options="KSU_GIT_VERSION=$(KSU_VERSION)
                
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
