@@ -42,12 +42,12 @@ jobs:
         # Setup KernelSU
         curl -fsSL "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         
-        # Get KSU version (simple fallback method by default)
+        # Get KSU version
         cd KernelSU
         BASE_VERSION=10200
         COMMIT_COUNT=$(git rev-list --count HEAD)
         KSU_VERSION=$((COMMIT_COUNT + BASE_VERSION))
-        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+        echo "KSU_GIT_VERSION=$KSU_VERSION" >> $GITHUB_ENV
         echo "KernelSU version: $KSU_VERSION"
         cd ..
         
