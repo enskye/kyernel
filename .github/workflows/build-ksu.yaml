@@ -105,7 +105,13 @@ jobs:
     - name: Configure defconfig
       run: |
         cd android-kernel
-        rm -f common/android/abi_gki_protected_exports_*
+        
+        # Create empty ABI files to satisfy build requirements but disable ABI checks
+        touch common/android/abi_gki_protected_exports_aarch64
+        touch common/android/abi_gki_protected_exports_x86_64
+        
+        # Alternative approach: modify the BUILD file to not require ABI files
+        # sed -i '/abi_gki_protected_exports/d' common/BUILD.bazel
         
         # Create a temporary config fragment with our KSU options
         cat > ksu_config.fragment << 'EOF'
