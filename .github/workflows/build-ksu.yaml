@@ -121,13 +121,13 @@ jobs:
         # Add KSU and SUSFS configs
         echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
-        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=n" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
-        echo "# CONFIG_KSU_SUSFS_SUS_OVERLAYFS is not set" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
@@ -135,6 +135,7 @@ jobs:
         echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> ./common/arch/arm64/configs/gki_defconfig
         
     - name: Build kernel
       run: |
@@ -142,44 +143,7 @@ jobs:
         # Source the build environment if it exists
         [ -f build_env.sh ] && source build_env.sh
         bazel build //common:kernel_aarch64_dist
-        
-    - name: Extract and upload artifacts
-      run: |
-        cd android-kernel
-        mkdir -p output
-        
-        # Find and copy kernel image
-        find bazel-bin -name "Image.gz" -exec cp {} output/ \; 2>/dev/null || echo "Image.gz not found"
-        find bazel-bin -name "Image" -exec cp {} output/ \; 2>/dev/null || echo "Image not found"
-        
-        # Find and copy device tree blobs
-        find bazel-bin -name "*.dtb" -exec cp {} output/ \; 2>/dev/null || echo "No DTB files found"
-        find bazel-bin -name "*.dtbo" -exec cp {} output/ \; 2>/dev/null || echo "No DTBO files found"
-        
-        # Copy kernel modules if they exist
-        find bazel-bin -name "*.ko" -exec cp {} output/ \; 2>/dev/null || echo "No kernel modules found"
-        
-        # Copy config files - try multiple locations
-        if [ -f "common/.config" ]; then
-          cp common/.config output/
-        elif [ -f "out/android14-6.1/common/.config" ]; then
-          cp out/android14-6.1/common/.config output/
-        elif find . -name ".config" -path "*/common/*" | head -1 | xargs -I {} cp {} output/ 2>/dev/null; then
-          echo "Found and copied .config from build output"
-        else
-          echo "Warning: No .config file found, creating placeholder"
-          echo "# Kernel configuration not available" > output/kernel.config
-        fi
-        
-        # Copy version info
-        echo "KernelSU + SUSFS Build" > output/build_info.txt
-        echo "Build date: $(date)" >> output/build_info.txt
-        echo "Kernel version: $(find bazel-bin -name "Image*" | head -1 | xargs file 2>/dev/null || echo 'Unknown')" >> output/build_info.txt
-        
-        # List all artifacts found
-        echo "Build artifacts:"
-        ls -la output/
-        
+               
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
