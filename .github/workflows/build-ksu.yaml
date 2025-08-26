@@ -59,7 +59,9 @@ jobs:
         
         # Find and copy the appropriate kernel patch
         KERNEL_PATCH=""
-        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch" ]; then
+        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
+          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
+        elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch" ]; then
           KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch"
         elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch" ]; then
           KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch"
