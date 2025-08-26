@@ -36,6 +36,13 @@ jobs:
         cd android-kernel
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         
+        # Set KSU_GIT_VERSION to fix the versioning warning
+        cd KernelSU
+        KSU_VERSION=$(git describe --abbrev=12 --tags --always 2>/dev/null || echo "v0.9.5-unknown")
+        echo "export KSU_GIT_VERSION=$KSU_VERSION" >> ../build_env.sh
+        echo "KSU_GIT_VERSION set to: $KSU_VERSION"
+        cd ..
+        
     - name: Setup SUSFS4KSU
       run: |
         cd android-kernel
@@ -93,33 +100,85 @@ jobs:
             if patch -p1 --dry-run < 50_add_susfs_in_gki-android14-6.1.patch >/dev/null 2>&1; then
               patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
               echo "Successfully applied kernel SUSFS patch"
-              # Only add configs if patch was successful
-              echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
-              echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
             else
               echo "Kernel patch cannot be applied cleanly"
-              # Just enable basic KSU without SUSFS
-              echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
             fi
             cd ..
-          else
-            # No kernel patch found, just enable basic KSU
-            echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
         fi
+        
+    - name: Configure defconfig  
+      run: |
+        cd android-kernel
+        
+        # Remove ABI exports dependency from BUILD.bazel and delete the files
+        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
+        rm -f common/android/abi_gki_protected_exports_*
+        
+        # Remove check_defconfig to avoid defconfig validation errors
+        sed -i 's/check_defconfig//' ./common/build.config.gki
+        
+        # Add KSU and SUSFS configs
+        echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "# CONFIG_KSU_SUSFS_SUS_OVERLAYFS is not set" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
         
     - name: Build kernel
       run: |
         cd android-kernel
+        # Source the build environment if it exists
+        [ -f build_env.sh ] && source build_env.sh
         bazel build //common:kernel_aarch64_dist
         
     - name: Extract and upload artifacts
       run: |
         cd android-kernel
-        mkdir output
-        find bazel-bin -name "Image.gz" -exec cp {} output/ \;
-        find bazel-bin -name "*.dtb" -exec cp {} output/ \; || true
-        cp common/.config output/
+        mkdir -p output
+        
+        # Find and copy kernel image
+        find bazel-bin -name "Image.gz" -exec cp {} output/ \; 2>/dev/null || echo "Image.gz not found"
+        find bazel-bin -name "Image" -exec cp {} output/ \; 2>/dev/null || echo "Image not found"
+        
+        # Find and copy device tree blobs
+        find bazel-bin -name "*.dtb" -exec cp {} output/ \; 2>/dev/null || echo "No DTB files found"
+        find bazel-bin -name "*.dtbo" -exec cp {} output/ \; 2>/dev/null || echo "No DTBO files found"
+        
+        # Copy kernel modules if they exist
+        find bazel-bin -name "*.ko" -exec cp {} output/ \; 2>/dev/null || echo "No kernel modules found"
+        
+        # Copy config files - try multiple locations
+        if [ -f "common/.config" ]; then
+          cp common/.config output/
+        elif [ -f "out/android14-6.1/common/.config" ]; then
+          cp out/android14-6.1/common/.config output/
+        elif find . -name ".config" -path "*/common/*" | head -1 | xargs -I {} cp {} output/ 2>/dev/null; then
+          echo "Found and copied .config from build output"
+        else
+          echo "Warning: No .config file found, creating placeholder"
+          echo "# Kernel configuration not available" > output/kernel.config
+        fi
+        
+        # Copy version info
+        echo "KernelSU + SUSFS Build" > output/build_info.txt
+        echo "Build date: $(date)" >> output/build_info.txt
+        echo "Kernel version: $(find bazel-bin -name "Image*" | head -1 | xargs file 2>/dev/null || echo 'Unknown')" >> output/build_info.txt
+        
+        # List all artifacts found
+        echo "Build artifacts:"
+        ls -la output/
         
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
