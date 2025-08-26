@@ -91,13 +91,13 @@ jobs:
         
         # Apply patches
         if [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-          cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
+          cd KernelSU && patch -p1 -F3 < 10_enable_susfs_for_ksu.patch
           echo "Applied KernelSU patch"
           cd ..
         fi
         
         if [ -f "common/50_add_susfs_in_kernel.patch" ]; then
-          cd common && patch -p1 < 50_add_susfs_in_kernel.patch
+          cd common && patch -p1 -F3 < 50_add_susfs_in_kernel.patch
           echo "Applied kernel patch"
           cd ..
         fi
