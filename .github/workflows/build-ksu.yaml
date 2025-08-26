@@ -44,12 +44,61 @@ jobs:
     - name: Apply SUSFS patches
       run: |
         cd android-kernel
-        cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-        cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch common/ || cp ./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch common/50_add_susfs_in_kernel.patch
-        if [ -d "./susfs4ksu/kernel_patches/fs" ]; then cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/; fi
-        if [ -d "./susfs4ksu/kernel_patches/include/linux" ]; then cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/; fi
-        cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
-        cd ../common && patch -p1 < 50_add_susfs_in_kernel.patch
+        
+        # Debug: List available patch files
+        echo "Available patch files:"
+        find ./susfs4ksu/kernel_patches/ -name "*.patch" 2>/dev/null || echo "No patch files found"
+        
+        # Copy KernelSU patch if it exists
+        if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+          cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+          echo "Copied KernelSU patch"
+        else
+          echo "Warning: KernelSU patch not found"
+        fi
+        
+        # Find and copy the appropriate kernel patch
+        KERNEL_PATCH=""
+        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch" ]; then
+          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch"
+        elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch" ]; then
+          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch"
+        elif [ -f "./susfs4ksu/kernel_patches/add_susfs_in_kernel.patch" ]; then
+          KERNEL_PATCH="./susfs4ksu/kernel_patches/add_susfs_in_kernel.patch"
+        fi
+        
+        if [ -n "$KERNEL_PATCH" ]; then
+          cp "$KERNEL_PATCH" common/50_add_susfs_in_kernel.patch
+          echo "Copied kernel patch: $KERNEL_PATCH"
+        else
+          echo "Error: No suitable kernel patch found"
+          exit 1
+        fi
+        
+        # Copy filesystem patches if they exist
+        if [ -d "./susfs4ksu/kernel_patches/fs" ]; then
+          cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/
+          echo "Copied fs patches"
+        fi
+        
+        # Copy include patches if they exist
+        if [ -d "./susfs4ksu/kernel_patches/include/linux" ]; then
+          cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/
+          echo "Copied include patches"
+        fi
+        
+        # Apply patches
+        if [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+          cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
+          echo "Applied KernelSU patch"
+          cd ..
+        fi
+        
+        if [ -f "common/50_add_susfs_in_kernel.patch" ]; then
+          cd common && patch -p1 < 50_add_susfs_in_kernel.patch
+          echo "Applied kernel patch"
+          cd ..
+        fi
         
     - name: Configure defconfig
       run: |
