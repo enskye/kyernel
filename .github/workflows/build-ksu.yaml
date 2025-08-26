@@ -25,10 +25,13 @@ jobs:
         repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
         repo sync -j$(nproc)
         
-    - name: Setup KernelSU with versioning
+    - name: Integrate official KernelSU
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash - main
+        
+    - name: Set KernelSU versioning
       run: |
         cd android-kernel
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash - main
         git clone https://github.com/tiann/KernelSU.git -b main
         cd KernelSU
         BASE_VERSION=10200
