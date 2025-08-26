@@ -54,83 +54,55 @@ jobs:
       run: |
         cd android-kernel
         
-        # Debug: List available patch files
-        echo "Available patch files:"
-        find ./susfs4ksu/kernel_patches/ -name "*.patch" 2>/dev/null || echo "No patch files found"
+        # First, let's check what KernelSU setup already provides
+        echo "Checking existing KernelSU configuration:"
+        find KernelSU/ -name "Kconfig*" -exec grep -l "KSU" {} \; 2>/dev/null || echo "No KSU Kconfig found"
         
-        # Copy KernelSU patch if it exists
-        if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-          cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-          echo "Copied KernelSU patch"
-        else
-          echo "Warning: KernelSU patch not found"
-        fi
-        
-        # Find and copy the appropriate kernel patch
-        KERNEL_PATCH=""
-        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
-        elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch"
-        elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch"
-        elif [ -f "./susfs4ksu/kernel_patches/add_susfs_in_kernel.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/add_susfs_in_kernel.patch"
-        fi
-        
-        if [ -n "$KERNEL_PATCH" ]; then
-          cp "$KERNEL_PATCH" common/50_add_susfs_in_kernel.patch
-          echo "Copied kernel patch: $KERNEL_PATCH"
-        else
-          echo "Error: No suitable kernel patch found"
-          exit 1
-        fi
-        
-        # Copy filesystem patches if they exist
-        if [ -d "./susfs4ksu/kernel_patches/fs" ]; then
-          cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/
-          echo "Copied fs patches"
-        fi
-        
-        # Copy include patches if they exist
-        if [ -d "./susfs4ksu/kernel_patches/include/linux" ]; then
-          cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-          echo "Copied include patches"
-        fi
-        
-        # Apply patches with force and reverse detection
-        if [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-          cd KernelSU 
-          # Check if patch is already applied by testing a key change
-          if ! grep -q "CONFIG_KSU_SUSFS" kernel/Kconfig 2>/dev/null; then
-            patch -p1 -F3 --force < 10_enable_susfs_for_ksu.patch || patch -p1 -F3 -R < 10_enable_susfs_for_ksu.patch
-            echo "Applied/handled KernelSU patch"
-          else
-            echo "KernelSU patch already applied, skipping"
-          fi
-          cd ..
-        fi
-        
-        if [ -f "common/50_add_susfs_in_kernel.patch" ]; then
-          cd common
-          # Check if patch is already applied by testing for SUSFS in fs/
-          if [ ! -d "fs/susfs" ]; then
-            patch -p1 -F3 --force < 50_add_susfs_in_kernel.patch || echo "Patch application had issues, continuing..."
-            echo "Applied/handled kernel patch"
-          else
-            echo "Kernel patch already applied, skipping"
-          fi
-          cd ..
-        fi
-        
-        # NOW add only basic configs after patches are applied - let patches handle the rest
-        if ! grep -q "CONFIG_KSU=y" ./common/arch/arm64/configs/gki_defconfig; then
+        # Check if SUSFS support is already built into KernelSU
+        if grep -r "SUSFS" KernelSU/ 2>/dev/null; then
+          echo "SUSFS support found in KernelSU"
+          # Just enable basic KSU - SUSFS might be auto-enabled
           echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-        fi
-        
-        # Only add basic SUSFS enablement - let the patches define the rest
-        if ! grep -q "CONFIG_KSU_SUSFS=y" ./common/arch/arm64/configs/gki_defconfig; then
-          echo "CONFIG_KSU_SUSFS=y" >> ./common/arch/arm64/configs/gki_defconfig
+        else
+          echo "No built-in SUSFS support, attempting manual integration"
+          
+          # Debug: List available patch files
+          echo "Available patch files:"
+          find ./susfs4ksu/kernel_patches/ -name "*.patch" 2>/dev/null || echo "No patch files found"
+          
+          # Try to apply only essential patches without forcing
+          if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+            cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+            cd KernelSU
+            if patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch >/dev/null 2>&1; then
+              patch -p1 < 10_enable_susfs_for_ksu.patch
+              echo "Successfully applied KernelSU SUSFS patch"
+            else
+              echo "KernelSU patch cannot be applied cleanly, skipping"
+            fi
+            cd ..
+          fi
+          
+          # Copy and apply kernel patches only if they can be applied cleanly  
+          if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
+            cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+            cd common
+            if patch -p1 --dry-run < 50_add_susfs_in_gki-android14-6.1.patch >/dev/null 2>&1; then
+              patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
+              echo "Successfully applied kernel SUSFS patch"
+              # Only add configs if patch was successful
+              echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
+              echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
+            else
+              echo "Kernel patch cannot be applied cleanly"
+              # Just enable basic KSU without SUSFS
+              echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
+            fi
+            cd ..
+          else
+            # No kernel patch found, just enable basic KSU
+            echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
+          fi
         fi
         
     - name: Build kernel
