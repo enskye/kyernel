@@ -28,6 +28,7 @@ jobs:
     - name: Setup KernelSU with versioning
       run: |
         cd android-kernel
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash - main
         git clone https://github.com/tiann/KernelSU.git -b main
         cd KernelSU
         BASE_VERSION=10200
