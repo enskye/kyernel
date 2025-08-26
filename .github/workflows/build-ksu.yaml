@@ -107,21 +107,28 @@ jobs:
         cd android-kernel
         rm -f common/android/abi_gki_protected_exports_*
         
-        # Add KernelSU and SUSFS configs to defconfig
-        echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
-        echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig
-        echo "# CONFIG_KSU_SUSFS_SUS_MOUNT is not set" >> common/arch/arm64/configs/gki_defconfig
+        # Create a temporary config fragment with our KSU options
+        cat > ksu_config.fragment << 'EOF'
+        CONFIG_KSU=y
+        CONFIG_KSU_SUSFS=y
+        # CONFIG_KSU_SUSFS_SUS_MOUNT is not set
+        CONFIG_KPROBES=y
+        CONFIG_HAVE_KPROBES=y
+        CONFIG_KPROBE_EVENTS=y
+        EOF
         
-        # Enable kprobes if not already enabled
-        if ! grep -q "CONFIG_KPROBES=y" common/arch/arm64/configs/gki_defconfig; then
-          echo "CONFIG_KPROBES=y" >> common/arch/arm64/configs/gki_defconfig
-        fi
-        if ! grep -q "CONFIG_HAVE_KPROBES=y" common/arch/arm64/configs/gki_defconfig; then
-          echo "CONFIG_HAVE_KPROBES=y" >> common/arch/arm64/configs/gki_defconfig
-        fi
-        if ! grep -q "CONFIG_KPROBE_EVENTS=y" common/arch/arm64/configs/gki_defconfig; then
-          echo "CONFIG_KPROBE_EVENTS=y" >> common/arch/arm64/configs/gki_defconfig
-        fi
+        # Merge the config fragment with the base defconfig
+        cd common
+        ARCH=arm64 scripts/kconfig/merge_config.sh arch/arm64/configs/gki_defconfig ../ksu_config.fragment
+        
+        # Copy the merged config back to defconfig
+        cp .config arch/arm64/configs/gki_defconfig
+        
+        # Generate a clean defconfig to ensure proper format
+        make ARCH=arm64 savedefconfig
+        cp defconfig arch/arm64/configs/gki_defconfig
+        
+        cd ..
         
     - name: Build kernel
       run: |
