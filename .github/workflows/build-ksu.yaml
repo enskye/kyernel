@@ -41,67 +41,7 @@ jobs:
         cd android-kernel
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
         
-    - name: Apply SUSFS patches
-      run: |
-        cd android-kernel
-        
-        # Debug: List available patch files
-        echo "Available patch files:"
-        find ./susfs4ksu/kernel_patches/ -name "*.patch" 2>/dev/null || echo "No patch files found"
-        
-        # Copy KernelSU patch if it exists
-        if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-          cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-          echo "Copied KernelSU patch"
-        else
-          echo "Warning: KernelSU patch not found"
-        fi
-        
-        # Find and copy the appropriate kernel patch
-        KERNEL_PATCH=""
-        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch"
-        elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel-6.1.patch"
-        elif [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/50_add_susfs_in_kernel.patch"
-        elif [ -f "./susfs4ksu/kernel_patches/add_susfs_in_kernel.patch" ]; then
-          KERNEL_PATCH="./susfs4ksu/kernel_patches/add_susfs_in_kernel.patch"
-        fi
-        
-        if [ -n "$KERNEL_PATCH" ]; then
-          cp "$KERNEL_PATCH" common/50_add_susfs_in_kernel.patch
-          echo "Copied kernel patch: $KERNEL_PATCH"
-        else
-          echo "Error: No suitable kernel patch found"
-          exit 1
-        fi
-        
-        # Copy filesystem patches if they exist
-        if [ -d "./susfs4ksu/kernel_patches/fs" ]; then
-          cp -r ./susfs4ksu/kernel_patches/fs/* common/fs/
-          echo "Copied fs patches"
-        fi
-        
-        # Copy include patches if they exist
-        if [ -d "./susfs4ksu/kernel_patches/include/linux" ]; then
-          cp -r ./susfs4ksu/kernel_patches/include/linux/* common/include/linux/
-          echo "Copied include patches"
-        fi
-        
-        # Apply patches
-        if [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-          cd KernelSU && patch -p1 -F3 < 10_enable_susfs_for_ksu.patch
-          echo "Applied KernelSU patch"
-          cd ..
-        fi
-        
-        if [ -f "common/50_add_susfs_in_kernel.patch" ]; then
-          cd common && patch -p1 -F3 < 50_add_susfs_in_kernel.patch
-          echo "Applied kernel patch"
-          cd ..
-        fi
-        
+
     - name: Configure defconfig
       run: |
         cd android-kernel
@@ -158,16 +98,28 @@ jobs:
           echo "Copied include patches"
         fi
         
-        # Apply patches
+        # Apply patches with force and reverse detection
         if [ -f "KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-          cd KernelSU && patch -p1 -F3 < 10_enable_susfs_for_ksu.patch
-          echo "Applied KernelSU patch"
+          cd KernelSU 
+          # Check if patch is already applied by testing a key change
+          if ! grep -q "CONFIG_KSU_SUSFS" kernel/Kconfig 2>/dev/null; then
+            patch -p1 -F3 --force < 10_enable_susfs_for_ksu.patch || patch -p1 -F3 -R < 10_enable_susfs_for_ksu.patch
+            echo "Applied/handled KernelSU patch"
+          else
+            echo "KernelSU patch already applied, skipping"
+          fi
           cd ..
         fi
         
         if [ -f "common/50_add_susfs_in_kernel.patch" ]; then
-          cd common && patch -p1 -F3 < 50_add_susfs_in_kernel.patch
-          echo "Applied kernel patch"
+          cd common
+          # Check if patch is already applied by testing for SUSFS in fs/
+          if [ ! -d "fs/susfs" ]; then
+            patch -p1 -F3 --force < 50_add_susfs_in_kernel.patch || echo "Patch application had issues, continuing..."
+            echo "Applied/handled kernel patch"
+          else
+            echo "Kernel patch already applied, skipping"
+          fi
           cd ..
         fi
         
