@@ -88,28 +88,45 @@ jobs:
         export KSU_GIT_VERSION="${{ env.KSUGITVER }}" KSUVER="${{ env.KSUVER }}"
         bazel build //common:kernel_aarch64_dist
         
-    - name: Prepare and upload artifacts
+    - name: Prepare artifacts
       run: |
         cd android-kernel
         mkdir -p artifacts
-        BAZEL_OUT=$(bazel info bazel-bin)/common/kernel_aarch64_dist
         
-        # Copy kernel files
-        find "$BAZEL_OUT" -name "Image*" -o -name "*.dtb" -o -name "*.dtbo" -o -name "*.ko" -o -name "System.map" -o -name "vmlinux" | xargs -I {} cp {} artifacts/ 2>/dev/null || true
+        # Get bazel output directory
+        BAZEL_BIN=$(bazel info bazel-bin)
+        DIST_DIR="$BAZEL_BIN/common/kernel_aarch64_dist"
+        
+        echo "Bazel bin directory: $BAZEL_BIN"
+        echo "Distribution directory: $DIST_DIR"
+        echo "Contents of dist directory:"
+        ls -la "$DIST_DIR" || echo "Dist directory not found, checking bazel-bin structure:"
+        find "$BAZEL_BIN" -name "*Image*" -o -name "*.dtb" -o -name "*.dtbo" 2>/dev/null || echo "No kernel images found"
+        
+        # Copy all kernel related files from bazel output
+        if [ -d "$DIST_DIR" ]; then
+          # Copy everything from the distribution directory
+          cp -r "$DIST_DIR"/* artifacts/ 2>/dev/null || true
+        else
+          # Fallback: search entire bazel-bin for kernel files
+          find "$BAZEL_BIN" -type f \( -name "Image*" -o -name "*.dtb" -o -name "*.dtbo" -o -name "*.ko" -o -name "System.map" -o -name "vmlinux" -o -name "*.img" \) -exec cp {} artifacts/ \; 2>/dev/null || true
+        fi
+        
+        # Also check for any compressed kernel images
+        find "$BAZEL_BIN" -name "*.gz" -o -name "*.lz4" -o -name "*.bz2" | head -20 | xargs -I {} cp {} artifacts/ 2>/dev/null || true
         
         # Create build info
-        cat > artifacts/build-info.txt << EOF
-        Build Date: $(date)
-        KernelSU Version: ${{ env.KSUVER }}
-        KernelSU Git Version: ${{ env.KSUGITVER }}
-        Kernel: Android14-6.1-LTS + KernelSU + SUSFS4KSU
-        EOF
+        echo "Build Date: $(date)" > artifacts/build-info.txt
+        echo "KernelSU Version: ${{ env.KSUVER }}" >> artifacts/build-info.txt
+        echo "KernelSU Git Version: ${{ env.KSUGITVER }}" >> artifacts/build-info.txt
+        echo "Kernel: Android14-6.1-LTS + KernelSU + SUSFS4KSU" >> artifacts/build-info.txt
         
-        echo "Artifacts: $(ls artifacts/)"
+        echo "Final artifacts:"
+        ls -la artifacts/
       
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-ksu${{ env.KSUVER }}-$(date +%Y%m%d)
+        name: kernel-ksu${{ env.KSUVER }}-$(date +%Y%m%d-%H%M)
         path: android-kernel/artifacts/
         retention-days: 30
