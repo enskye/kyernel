@@ -41,69 +41,45 @@ jobs:
         cd android-kernel
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
         
+    - name: Apply SUSFS patches
+      run: |
+        cd android-kernel
 
+        # Apply KernelSU patch if exists
+        if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+          cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+          cd KernelSU
+          if patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch >/dev/null 2>&1; then
+            patch -p1 < 10_enable_susfs_for_ksu.patch
+            echo "Applied KernelSU SUSFS patch"
+          fi
+          cd ..
+        fi
+
+        # Apply kernel patch if available
+        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+          cd common
+          if patch -p1 --dry-run < 50_add_susfs_in_gki-android14-6.1.patch >/dev/null 2>&1; then
+            patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
+            echo "Applied SUSFS kernel patch"
+          fi
+          cd ..
+        fi
+        
     - name: Configure defconfig
       run: |
-        cd android-kernel
-        
+        cd android-kernel/common
         # Remove ABI exports dependency from BUILD.bazel and delete the files
-        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
-        rm -f common/android/abi_gki_protected_exports_*
-        
-    - name: Apply SUSFS patches and configure
-      run: |
-        cd android-kernel
-        
-        # First, let's check what KernelSU setup already provides
-        echo "Checking existing KernelSU configuration:"
-        find KernelSU/ -name "Kconfig*" -exec grep -l "KSU" {} \; 2>/dev/null || echo "No KSU Kconfig found"
-        
-        # Check if SUSFS support is already built into KernelSU
-        if grep -r "SUSFS" KernelSU/ 2>/dev/null; then
-          echo "SUSFS support found in KernelSU"
-          # Just enable basic KSU - SUSFS might be auto-enabled
-          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-        else
-          echo "No built-in SUSFS support, attempting manual integration"
-          
-          # Debug: List available patch files
-          echo "Available patch files:"
-          find ./susfs4ksu/kernel_patches/ -name "*.patch" 2>/dev/null || echo "No patch files found"
-          
-          # Try to apply only essential patches without forcing
-          if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-            cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-            cd KernelSU
-            if patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch >/dev/null 2>&1; then
-              patch -p1 < 10_enable_susfs_for_ksu.patch
-              echo "Successfully applied KernelSU SUSFS patch"
-            else
-              echo "KernelSU patch cannot be applied cleanly, skipping"
-            fi
-            cd ..
-          fi
-          
-          # Copy and apply kernel patches only if they can be applied cleanly  
-          if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
-            cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-            cd common
-            if patch -p1 --dry-run < 50_add_susfs_in_gki-android14-6.1.patch >/dev/null 2>&1; then
-              patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
-              echo "Successfully applied kernel SUSFS patch"
-              # Only add configs if patch was successful
-              echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
-              echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/gki_defconfig
-            else
-              echo "Kernel patch cannot be applied cleanly"
-              # Just enable basic KSU without SUSFS
-              echo "CONFIG_KSU=y" >> arch/arm64/configs/gki_defconfig
-            fi
-            cd ..
-          else
-            # No kernel patch found, just enable basic KSU
-            echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-          fi
-        fi
+        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' BUILD.bazel
+        rm -f android/abi_gki_protected_exports_*
+
+        # Regenerate defconfig with required configs
+        make ARCH=arm64 gki_defconfig
+        ./scripts/config --file .config --enable CONFIG_KSU || true
+        ./scripts/config --file .config --enable CONFIG_KSU_SUSFS || true
+        make ARCH=arm64 savedefconfig
+        cp defconfig arch/arm64/configs/gki_defconfig
         
     - name: Build kernel
       run: |
