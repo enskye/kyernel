@@ -10,112 +10,58 @@ jobs:
     steps:
     - name: Setup environment
       run: |
-        sudo apt-get update
-        sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 libncurses-dev lib32ncurses-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc cpio rsync python3
+        sudo apt-get update && sudo apt-get install -y git-core gnupg flex bison build-essential zip curl zlib1g-dev gcc-multilib g++-multilib libc6-dev-i386 libncurses-dev lib32ncurses-dev x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev libxml2-utils xsltproc unzip fontconfig bc cpio rsync python3
         curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor | sudo tee /usr/share/keyrings/bazel-archive-keyring.gpg > /dev/null
         echo "deb [arch=amd64 signed-by=/usr/share/keyrings/bazel-archive-keyring.gpg] https://storage.googleapis.com/bazel-apt stable jdk1.8" | sudo tee /etc/apt/sources.list.d/bazel.list
         sudo apt-get update && sudo apt-get install -y bazel
-        
-    - name: Setup repo tool
-      run: |
         mkdir -p ~/.bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo
-        chmod a+rx ~/.bin/repo
+        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/.bin/repo && chmod a+rx ~/.bin/repo
         echo ~/.bin >> $GITHUB_PATH
         
     - name: Clone kernel source
       run: |
-        git config --global user.name "GitHub Actions"
-        git config --global user.email "actions@github.com"
+        git config --global user.name "GitHub Actions" && git config --global user.email "actions@github.com"
         mkdir android-kernel && cd android-kernel
         repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
         repo sync -j$(nproc)
         
-    - name: Setup KernelSU
+    - name: Setup KernelSU with versioning
       run: |
         cd android-kernel
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-        
-        # Set KSU_GIT_VERSION to fix the versioning warning
+        git clone https://github.com/tiann/KernelSU.git -b main
         cd KernelSU
-        KSU_VERSION=$(git describe --abbrev=12 --tags --always 2>/dev/null || echo "v0.9.5-unknown")
-        echo "export KSU_GIT_VERSION=$KSU_VERSION" >> ../build_env.sh
-        echo "KSU_GIT_VERSION set to: $KSU_VERSION"
-        cd ..
+        BASE_VERSION=10200
+        KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" $BASE_VERSION)
+        KSU_GIT_VERSION=$(git describe --abbrev=12 --tags --always 2>/dev/null || echo "v0.9.5-$KSU_VERSION")
+        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+        echo "KSUGITVER=$KSU_GIT_VERSION" >> $GITHUB_ENV
+        echo "export KSU_GIT_VERSION=$KSU_GIT_VERSION" >> ../build_env.sh
+        echo "export KSUVER=$KSU_VERSION" >> ../build_env.sh
+        echo "KernelSU Version: $KSU_VERSION, Git Version: $KSU_GIT_VERSION"
         
-    - name: Setup SUSFS4KSU
+    - name: Setup SUSFS4KSU and apply patches
       run: |
         cd android-kernel
         git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
         
-
-    - name: Configure defconfig
-      run: |
-        cd android-kernel
-        
-        # Remove ABI exports dependency from BUILD.bazel and delete the files
-        sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
-        rm -f common/android/abi_gki_protected_exports_*
-        
-        # Remove check_defconfig to avoid defconfig validation errors
-        sed -i 's/check_defconfig//' ./common/build.config.gki
-        
-    - name: Apply SUSFS patches and configure
-      run: |
-        cd android-kernel
-        
-        # First, let's check what KernelSU setup already provides
-        echo "Checking existing KernelSU configuration:"
-        find KernelSU/ -name "Kconfig*" -exec grep -l "KSU" {} \; 2>/dev/null || echo "No KSU Kconfig found"
-        
-        # Check if SUSFS support is already built into KernelSU
-        if grep -r "SUSFS" KernelSU/ 2>/dev/null; then
-          echo "SUSFS support found in KernelSU"
-          # Just enable basic KSU - SUSFS might be auto-enabled
-          echo "CONFIG_KSU=y" >> ./common/arch/arm64/configs/gki_defconfig
-        else
-          echo "No built-in SUSFS support, attempting manual integration"
-          
-          # Debug: List available patch files
-          echo "Available patch files:"
-          find ./susfs4ksu/kernel_patches/ -name "*.patch" 2>/dev/null || echo "No patch files found"
-          
-          # Try to apply only essential patches without forcing
-          if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
-            cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-            cd KernelSU
-            if patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch >/dev/null 2>&1; then
-              patch -p1 < 10_enable_susfs_for_ksu.patch
-              echo "Successfully applied KernelSU SUSFS patch"
-            else
-              echo "KernelSU patch cannot be applied cleanly, skipping"
-            fi
-            cd ..
-          fi
-          
-          # Copy and apply kernel patches only if they can be applied cleanly  
-          if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
-            cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
-            cd common
-            if patch -p1 --dry-run < 50_add_susfs_in_gki-android14-6.1.patch >/dev/null 2>&1; then
-              patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch
-              echo "Successfully applied kernel SUSFS patch"
-            else
-              echo "Kernel patch cannot be applied cleanly"
-            fi
-            cd ..
-          fi
+        # Apply SUSFS patches if available
+        if [ -f "./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" ]; then
+          cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+          cd KernelSU && patch -p1 --dry-run < 10_enable_susfs_for_ksu.patch >/dev/null 2>&1 && patch -p1 < 10_enable_susfs_for_ksu.patch && echo "Applied KernelSU SUSFS patch" && cd ..
         fi
         
-    - name: Configure defconfig  
+        if [ -f "./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch" ]; then
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch common/
+          cd common && patch -p1 --dry-run < 50_add_susfs_in_gki-android14-6.1.patch >/dev/null 2>&1 && patch -p1 < 50_add_susfs_in_gki-android14-6.1.patch && echo "Applied kernel SUSFS patch" && cd ..
+        fi
+        
+    - name: Configure and build kernel
       run: |
         cd android-kernel
         
-        # Remove ABI exports dependency from BUILD.bazel and delete the files
+        # Remove ABI dependencies and defconfig checks
         sed -i '/^[[:space:]]*"protected_exports_list"[[:space:]]*:[[:space:]]*"android\/abi_gki_protected_exports_aarch64",$/d' common/BUILD.bazel
         rm -f common/android/abi_gki_protected_exports_*
-        
-        # Remove check_defconfig to avoid defconfig validation errors
         sed -i 's/check_defconfig//' ./common/build.config.gki
         
         # Add KSU and SUSFS configs
@@ -137,15 +83,33 @@ jobs:
         echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> ./common/arch/arm64/configs/gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_SU=y" >> ./common/arch/arm64/configs/gki_defconfig
         
-    - name: Build kernel
+        # Build kernel
+        [ -f build_env.sh ] && source build_env.sh
+        export KSU_GIT_VERSION="${{ env.KSUGITVER }}" KSUVER="${{ env.KSUVER }}"
+        bazel build //common:kernel_aarch64_dist
+        
+    - name: Prepare and upload artifacts
       run: |
         cd android-kernel
-        # Source the build environment if it exists
-        [ -f build_env.sh ] && source build_env.sh
-        bazel build //common:kernel_aarch64_dist
-               
+        mkdir -p artifacts
+        BAZEL_OUT=$(bazel info bazel-bin)/common/kernel_aarch64_dist
+        
+        # Copy kernel files
+        find "$BAZEL_OUT" -name "Image*" -o -name "*.dtb" -o -name "*.dtbo" -o -name "*.ko" -o -name "System.map" -o -name "vmlinux" | xargs -I {} cp {} artifacts/ 2>/dev/null || true
+        
+        # Create build info
+        cat > artifacts/build-info.txt << EOF
+        Build Date: $(date)
+        KernelSU Version: ${{ env.KSUVER }}
+        KernelSU Git Version: ${{ env.KSUGITVER }}
+        Kernel: Android14-6.1-LTS + KernelSU + SUSFS4KSU
+        EOF
+        
+        echo "Artifacts: $(ls artifacts/)"
+      
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-build
-        path: android-kernel/output/*
+        name: kernel-ksu${{ env.KSUVER }}-$(date +%Y%m%d)
+        path: android-kernel/artifacts/
+        retention-days: 30
