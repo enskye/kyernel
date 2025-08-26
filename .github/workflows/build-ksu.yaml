@@ -39,13 +39,6 @@ jobs:
       run: |
         cd android-kernel
         
-        # Remove KernelSU directory if it exists from previous setup
-        rm -rf KernelSU
-        
-        # Add KernelSU as git submodule for proper versioning
-        git submodule add https://github.com/tiann/KernelSU.git KernelSU
-        git submodule update --init --recursive
-        
         # Setup KernelSU
         curl -fsSL "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
         
