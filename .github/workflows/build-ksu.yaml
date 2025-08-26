@@ -49,7 +49,8 @@ jobs:
         KSU_VERSION=$((COMMIT_COUNT + BASE_VERSION))
         echo "KSU_GIT_VERSION=$KSU_VERSION" >> $GITHUB_ENV
         echo "KernelSU version: $KSU_VERSION"
-        cd ..
+        cd .
+        export KSU_GIT_VERSION="$KSU_VERSION"
         
     - name: Apply SUSFS patches
       run: |
