@@ -106,14 +106,22 @@ jobs:
       run: |
         cd android-kernel
         rm -f common/android/abi_gki_protected_exports_*
-        cat >> common/arch/arm64/configs/gki_defconfig << 'EOF'
-        CONFIG_KSU=y
-        CONFIG_KSU_SUSFS=y
-        CONFIG_KSU_SUSFS_SUS_MOUNT=n
-        CONFIG_KPROBES=y
-        CONFIG_HAVE_KPROBES=y
-        CONFIG_KPROBE_EVENTS=y
-        EOF
+        
+        # Add KernelSU and SUSFS configs to defconfig
+        echo "CONFIG_KSU=y" >> common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_SUSFS=y" >> common/arch/arm64/configs/gki_defconfig
+        echo "# CONFIG_KSU_SUSFS_SUS_MOUNT is not set" >> common/arch/arm64/configs/gki_defconfig
+        
+        # Enable kprobes if not already enabled
+        if ! grep -q "CONFIG_KPROBES=y" common/arch/arm64/configs/gki_defconfig; then
+          echo "CONFIG_KPROBES=y" >> common/arch/arm64/configs/gki_defconfig
+        fi
+        if ! grep -q "CONFIG_HAVE_KPROBES=y" common/arch/arm64/configs/gki_defconfig; then
+          echo "CONFIG_HAVE_KPROBES=y" >> common/arch/arm64/configs/gki_defconfig
+        fi
+        if ! grep -q "CONFIG_KPROBE_EVENTS=y" common/arch/arm64/configs/gki_defconfig; then
+          echo "CONFIG_KPROBE_EVENTS=y" >> common/arch/arm64/configs/gki_defconfig
+        fi
         
     - name: Build kernel
       run: |
