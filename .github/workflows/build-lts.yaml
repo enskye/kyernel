@@ -175,17 +175,29 @@ jobs:
         tag_name: ${{ env.KERNEL_NAME }}
         name: ${{ env.KERNEL_NAME }}
         body: |
-          ## 🚀 LTS Kernel Build - ${{ env.KERNEL_NAME }}
+          ## 🚀 GKI2 Build - ${{ env.KERNEL_NAME }}
           
           **Build Information:**
-          - **Kernel Type**: LTS (Long Term Support)
+          - **Kernel Type**: ${{ env.KERNEL_TYPE }}
           - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
           - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
           
           **Components:**
           - ✅ **KernelSU-Next**: Latest with SUSFS integration
-          - ✅ **SUSFS**: Advanced root hiding capabilities  
+          - ✅ **SUSFS**: Root hiding capabilities  
           - ✅ **AnyKernel3**: Universal flashing support
+          
+          **Installation:**
+          1. Download the ZIP file below
+          2. Boot into custom recovery (TWRP/OrangeFox)
+          3. Flash the ZIP file
+          4. Reboot and enjoy!
+          
+          **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.
+        files: |
+          workarea/${{ env.KERNEL_NAME }}.zip
+        draft: false
+        prerelease: false
 
     - name: Upload raw kernel artifacts
       uses: actions/upload-artifact@v4
