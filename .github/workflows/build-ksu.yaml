@@ -106,7 +106,5 @@ jobs:
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-build-${{ github.run_number }}
+        name: kernel-build
         path: android-kernel/bazel-bin/common/kernel_aarch64_dist/
-        retention-days: 7
-      working-directory: ./
