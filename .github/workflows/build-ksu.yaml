@@ -101,7 +101,7 @@ jobs:
         
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
-        tools/bazel build //common:kernel_aarch64_dist --destdir=out/dist --config=fast --config=stamp --lto=thin
+        tools/bazel run //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin -- --destdir=out/dist
                
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
