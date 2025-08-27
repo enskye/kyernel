@@ -101,10 +101,10 @@ jobs:
         
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
-        tools/bazel build //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin
+        tools/bazel build //common:kernel_aarch64_dist --destdir=out/dist --config=fast --config=stamp --lto=thin
                
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: kernel-build
-        path: android-kernel/bazel-bin/common/kernel_aarch64_dist/
+        path: android-kernel/out/dist/*
