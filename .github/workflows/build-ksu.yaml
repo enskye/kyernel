@@ -101,7 +101,7 @@ jobs:
         
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
-        tools/bazel build //common:kernel_aarch64_dist --action_env=KSU_GIT_VERSION=${{ env.KSU_GIT_VERSION }} --config=fast --config=stamp --config=lto
+        tools/bazel build //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin
                
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
