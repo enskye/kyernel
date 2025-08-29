@@ -92,7 +92,7 @@ jobs:
         echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> gki_defconfig
-        echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./common/arch/arm64/configs/gki_defconfig
+        echo "CONFIG_KSU_KPROBES_HOOK=n" >> gki_defconfig
     - name: Build kernel
       run: |
         cd android-kernel
