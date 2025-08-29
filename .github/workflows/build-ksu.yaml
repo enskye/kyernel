@@ -80,7 +80,7 @@ jobs:
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=n" >> gki_defconfig
+        echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> gki_defconfig
