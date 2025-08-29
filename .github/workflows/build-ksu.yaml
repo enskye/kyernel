@@ -93,6 +93,11 @@ jobs:
         echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> gki_defconfig
         echo "CONFIG_KSU_KPROBES_HOOK=n" >> gki_defconfig
+
+    - name: Modify uname
+      run: |
+        echo 'echo "-kyernel"' > common/scripts/setlocalversion
+        
     - name: Build kernel
       run: |
         cd android-kernel
