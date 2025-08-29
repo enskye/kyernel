@@ -70,14 +70,8 @@ jobs:
         patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
         cd ../common
         patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch
-        patch -p1 --fuzz=3 < ../kernel_patches/kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4.patch
+        patch -p1 --fuzz=3 < ../kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4.patch
         
-        
-
-
-        #Apply hooks patch
-        cp kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4.patch a
-        patch -p1 
     - name: Configure kernel options
       run: |
         cd android-kernel/common/arch/arm64/configs
