@@ -97,7 +97,7 @@ jobs:
     - name: Modify uname
       run: |
         cd android-kernel
-        echo 'echo "-kyernel"' > common/scripts/setlocalversion
+        echo 'echo "-kyernel"' > ./common/scripts/setlocalversion
         
     - name: Build kernel
       run: |
