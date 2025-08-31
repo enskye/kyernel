@@ -28,6 +28,15 @@ jobs:
         git config --global user.email "actions@github.com"
         git config --global user.name "GitHub Actions"
         
+    - name: Create workspace and get build info
+      run: |
+        BUILD_DATE=$(date +"%Y%m%d")
+        BUILD_TIME=$(date +"%H%M")
+        KERNEL_NAME="kyernel-${BUILD_DATE}-${BUILD_TIME}"
+        echo "BUILD_DATE_FORMATTED=$(date +"%Y-%m-%d")" >> $GITHUB_ENV
+        echo "BUILD_TIME_FORMATTED=$(date +"%H:%M")" >> $GITHUB_ENV
+        echo "KERNEL_NAME=${KERNEL_NAME}" >> $GITHUB_ENV
+        
     - name: Clone kernel source
       run: |
         mkdir android-kernel && cd android-kernel
@@ -65,14 +74,11 @@ jobs:
         # Apply SUSFS patches
         cp susfs4ksu/kernel_patches/fs/* ./common/fs/
         cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-        cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
         cd KernelSU
-        patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
-        patch -p1 --fuzz=3 < ../kernel_patches/prctl.patch
-        #patch -p1 --fuzz=3 < ../kernel_patches/remove_dupe_blocks.patch
+        patch -p1 --fuzz=3 < ../kernel_patches/10_enable_susfs_for_ksu.patch
         
         cd ../common
-        patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch
+        patch -p1 --fuzz=3 < ../kernel_patches/50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 --fuzz=3 < ../kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4.patch
         
     - name: Configure kernel options
@@ -114,6 +120,54 @@ jobs:
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
         tools/bazel run //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin -- --destdir=out/dist
+
+    - name: Prepare kernel image
+      run: |
+        cd android-kernel/out/dist
+        
+        if [[ -f "Image" ]]; then
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        elif [[ -f "Image.gz" ]]; then
+          gunzip Image.gz
+          lz4 -9 -f Image Image.lz4
+          KERNEL_IMAGE="Image.lz4"
+        else
+          echo "❌ No kernel image found!"
+          exit 1
+        fi
+        
+        echo "KERNEL_IMAGE=${KERNEL_IMAGE}" >> $GITHUB_ENV
+
+    - name: Create AnyKernel3 package
+      run: |
+        cd android-kernel/out/dist
+        cp ../android-kernel/out/dist/$KERNEL_IMAGE .
+        ZIP_NAME="${KERNEL_NAME}.zip"
+        zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" "LICENSE"
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.KERNEL_NAME }}
+        name: ${{ env.KERNEL_NAME }}
+        body: |
+          ## 🚀 GKI2 Build - ${{ env.KERNEL_NAME }}
+          
+          **Build Information:**
+          - **Build Date**: ${{ env.BUILD_DATE_FORMATTED }}
+          - **Build Time**: ${{ env.BUILD_TIME_FORMATTED }} UTC
+          
+          **Components:**
+          - ✅ KernelSU;
+          - ✅ SUSFS;
+          - ✅ AnyKernel3.
+              
+          **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.
+        files: |
+          workarea/${{ env.KERNEL_NAME }}.zip
+        draft: false
+        prerelease: false
                
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
