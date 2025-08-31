@@ -127,6 +127,45 @@ jobs:
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
         tools/bazel run //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin -- --destdir=out/dist
+
+    - name: Package with AnyKernel3
+      run: |
+        # This step copies the compiled kernel image (Image.lz4) from the output
+        # directory into the AnyKernel3 folder, which is the standard place for it.
+        cp android-kernel/out/dist/Image.lz4 android-kernel/AnyKernel3/
+        
+        # We navigate into the AnyKernel3 directory to prepare for zipping.
+        cd android-kernel/AnyKernel3
+        
+        # This command creates the flashable zip.
+        # 'zip -r9' creates a recursive zip with the highest compression level.
+        # The output zip will be named using the KERNEL_NAME variable we set earlier
+        # (e.g., kyernel-20250831-2024.zip) and placed in the parent directory.
+        # We exclude the .git folder and README to keep the zip clean.
+        zip -r9 ../${{ env.KERNEL_NAME }}.zip * -x .git/\* README.md/\*
+
+    - name: Upload to GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        # This sets the name of the release, using the KERNEL_NAME variable.
+        name: Release ${{ env.KERNEL_NAME }}
+        
+        # This creates a Git tag for the release, which is required.
+        tag_name: ${{ env.KERNEL_NAME }}
+        
+        # You can customize the body of the release message here.
+        # We're using the build date/time and KernelSU version from earlier steps.
+        body: |
+          Kernel built on: ${{ env.BUILD_DATE_FORMATTED }} at ${{ env.BUILD_TIME_FORMATTED }}
+          KernelSU version: ${{ env.KSU_GIT_VERSION }}
+        
+        # This tells the action which file(s) to upload as release assets.
+        files: android-kernel/${{ env.KERNEL_NAME }}.zip
+        
+        # This option will cause the workflow to fail if the zip file isn't found.
+        fail_on_unmatched_files: true
+
+    # --- This is your existing final step ---
                
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
