@@ -68,6 +68,7 @@ jobs:
         cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
         cd KernelSU
         patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
+        patch -p1 --fuzz=3 < ../susfs4ksu/prctl.patch
         cd ../common
         patch -p1 --fuzz=3 < ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch
         patch -p1 --fuzz=3 < ../kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4.patch
