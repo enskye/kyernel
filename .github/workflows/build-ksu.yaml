@@ -149,7 +149,7 @@ jobs:
     - name: Create AnyKernel3 package
       run: |
         cd android-kernel/out/dist
-        cp ../android-kernel/out/dist/$KERNEL_IMAGE .
+        cp ../android-kernel/out/dist/Image.lz4 .
         ZIP_NAME="${KERNEL_NAME}.zip"
         zip -r9 "../$ZIP_NAME" . -x "*.git*" "README.md" "LICENSE"
 
