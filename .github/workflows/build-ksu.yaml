@@ -61,7 +61,7 @@ jobs:
         cd .
         export KSU_GIT_VERSION="$KSU_VERSION"
         
-    - name: Apply SUSFS patches
+    - name: Clone repositories
       run: |
         cd android-kernel
         
@@ -70,6 +70,9 @@ jobs:
         
         # Clone hooks patches
         git clone --depth=1 https://github.com/enskye/kernel_patches.git -b main kernel_patches
+
+        # Clone AnyKernel3
+        git clone --depth=1 https://github.com/enskye/AnyKernel3.git -b gki-2.0 AnyKernel3
         
         # Apply SUSFS patches
         cp susfs4ksu/kernel_patches/fs/* ./common/fs/
@@ -165,7 +168,7 @@ jobs:
               
           **Note**: This kernel includes KernelSU-Next with SUSFS for enhanced root hiding capabilities.
         files: |
-          workarea/${{ env.KERNEL_NAME }}.zip
+          android-kernel/out/dist/${{ env.KERNEL_NAME }}.zip
         draft: false
         prerelease: false
                
