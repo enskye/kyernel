@@ -32,7 +32,7 @@ jobs:
       run: |
         mkdir android-kernel && cd android-kernel
         repo init -u https://android.googlesource.com/kernel/manifest \
-          -b common-android14-6.1-lts --depth=1 --no-clone-bundle
+          -b common-android14-6.1-2025-06 --depth=1 --no-clone-bundle
         repo sync -c -j$(nproc) --no-tags --optimized-fetch
         
     - name: Setup KernelSU
