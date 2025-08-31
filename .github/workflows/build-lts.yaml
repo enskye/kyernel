@@ -61,7 +61,7 @@ jobs:
         rm -rf gki-lts-kernel
         mkdir -p gki-lts-kernel
         cd gki-lts-kernel
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-lts --depth=1
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.1-2025-06 --depth=1
         repo sync -c --no-tags --force-sync --no-repo-verify -j$(nproc)
         
         # Handle missing components
