@@ -79,13 +79,13 @@ jobs:
         cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
         cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
         cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
-        cp kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4.patch ./common/
+        cp kernel_patches/hooks/60_scope_minimized_hooks_ksu_1.4_v2.patch ./common/
         # cp kernel_patches/prctl.patch ./common/
         cd KernelSU
         patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
         cd ../common
         patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android14-6.1.patch
-        patch -p1 --fuzz=3 < 60_scope_minimized_hooks_ksu_1.4.patch
+        patch -p1 --fuzz=3 < 60_scope_minimized_hooks_ksu_1.4_v2.patch
         # patch -p1 --fuzz=3 < prctl.patch
         
     - name: Configure kernel options
