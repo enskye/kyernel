@@ -143,6 +143,9 @@ jobs:
     - name: Build kernel
       run: |
         cd workarea/gki-14-lts
+
+        # Remove check defconfig
+        sed -i 's/check_defconfig//' common/build.config.gki
         
         # Fallback build if kernel/configs missing
         if [[ ! -d "kernel/configs" ]]; then
