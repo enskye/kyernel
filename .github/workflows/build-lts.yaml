@@ -130,6 +130,15 @@ jobs:
         echo "KBUILD_SIGN_KEY=$(pwd)/signing/kernel_key.pem" >> $GITHUB_ENV
         echo "KBUILD_SIGN_CERT=$(pwd)/signing/kernel_cert.pem" >> $GITHUB_ENV
         echo "KBUILD_SIGN_PIN=" >> $GITHUB_ENV
+        
+    - name: Configure kernel options
+      run: |
+        cd workarea/gki-14-lts/common/arch/arm64/configs
+        
+        # Apply additional configs
+        
+        echo "CONFIG_OVERLAY_FS=y" >> gki_defconfig
+        echo "CONFIG_TMPFS_XATTR=y" >> gki_defconfig
 
     - name: Build kernel
       run: |
