@@ -110,6 +110,11 @@ jobs:
         echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> gki_defconfig
         echo "CONFIG_KSU_KPROBES_HOOK=n" >> gki_defconfig
 
+        # Apply additional configs
+        
+        echo "CONFIG_OVERLAY_FS=y" >> gki_defconfig
+        echo "CONFIG_TMPFS_XATTR=y" >> gki_defconfig
+
     - name: Modify uname
       run: |
         cd android-kernel
