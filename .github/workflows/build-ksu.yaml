@@ -49,7 +49,7 @@ jobs:
         cd android-kernel
         
         # Setup KernelSU
-        curl -fsSL "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        curl -fsSL "https://raw.githubusercontent.com/0ctobot/neutrino_kernel_google_caimito/57252208df8b8e8f02aad39b11c0808c4c2c5fc9/kernel/setup.sh" | bash -s 5725220
         
         # Get KSU version
         cd KernelSU
