@@ -82,7 +82,7 @@ jobs:
         #cp kernel_patches/hooks/60_scope-minimized_manual_hooks.patch  ./common/
         cp kernel_patches/test/ksu_safemode.patch ./common/
         cd ./common/
-        patch -p --fuzz=3 < ksu_safemode.patch
+        patch -p1 --fuzz=3 < ksu_safemode.patch
         #cd KernelSU
         #patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
         #cd ../common
