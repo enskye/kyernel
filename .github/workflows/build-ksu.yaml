@@ -92,22 +92,22 @@ jobs:
         cd android-kernel/common/arch/arm64/configs
         echo "CONFIG_KSU=y" >> gki_defconfig
         echo "CONFIG_KSU_SUSFS=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=n" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_USFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> gki_defconfig
-        echo "CONFIG_KSU_KPROBES_HOOK=n" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=n" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_USFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> gki_defconfig
+        #echo "CONFIG_KSU_KPROBES_HOOK=n" >> gki_defconfig
 
         # Apply additional configs
         
