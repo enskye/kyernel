@@ -75,23 +75,23 @@ jobs:
         git clone --depth=1 https://github.com/enskye/AnyKernel3.git -b gki-2.0 AnyKernel3
         
         # Apply SUSFS patches
-        cp susfs4ksu/kernel_patches/fs/* ./common/fs/
-        cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-        cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-        cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
+        # cp susfs4ksu/kernel_patches/fs/* ./common/fs/
+        # cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
+        # cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
+        # cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
         # cp kernel_patches/hooks/60_scope-minimized_manual_hooks.patch  ./common/
         cd KernelSU
-        patch -p1 --fuzz=5 < 10_enable_susfs_for_ksu.patch
+        # patch -p1 --fuzz=5 < 10_enable_susfs_for_ksu.patch
         cd ../common
-        patch -p1 --fuzz=5 < 50_add_susfs_in_gki-android14-6.1.patch
+        # patch -p1 --fuzz=5 < 50_add_susfs_in_gki-android14-6.1.patch
         # patch -p1 --fuzz=3 < 60_scope-minimized_manual_hooks.patch
         
         
     - name: Configure kernel options
       run: |
         cd android-kernel/common/arch/arm64/configs
-        echo "CONFIG_KSU=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS=y" >> gki_defconfig
+        #echo "CONFIG_KSU=y" >> gki_defconfig
+        #echo "CONFIG_KSU_SUSFS=y" >> gki_defconfig
         #echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> gki_defconfig
         #echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> gki_defconfig
         #echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> gki_defconfig
