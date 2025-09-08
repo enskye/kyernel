@@ -81,9 +81,9 @@ jobs:
         cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
         # cp kernel_patches/hooks/60_scope-minimized_manual_hooks.patch  ./common/
         cd KernelSU
-        patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
+        patch -p1 --fuzz=5 < 10_enable_susfs_for_ksu.patch
         cd ../common
-        patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android14-6.1.patch
+        patch -p1 --fuzz=5 < 50_add_susfs_in_gki-android14-6.1.patch
         # patch -p1 --fuzz=3 < 60_scope-minimized_manual_hooks.patch
         
         
