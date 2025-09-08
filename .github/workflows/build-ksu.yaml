@@ -111,8 +111,8 @@ jobs:
 
         # Apply additional configs
         
-        # echo "CONFIG_OVERLAY_FS=y" >> gki_defconfig
-        # echo "CONFIG_TMPFS_XATTR=y" >> gki_defconfig
+        echo "CONFIG_OVERLAY_FS=y" >> gki_defconfig
+        echo "CONFIG_TMPFS_XATTR=y" >> gki_defconfig
 
     - name: Modify uname
       run: |
