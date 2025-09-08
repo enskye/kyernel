@@ -90,7 +90,7 @@ jobs:
     - name: Configure kernel options
       run: |
         cd android-kernel/common/arch/arm64/configs
-        #echo "CONFIG_KSU=y" >> gki_defconfig
+        echo "CONFIG_KSU=y" >> gki_defconfig
         #echo "CONFIG_KSU_SUSFS=y" >> gki_defconfig
         #echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=y" >> gki_defconfig
         #echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> gki_defconfig
