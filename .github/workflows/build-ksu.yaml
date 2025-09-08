@@ -49,7 +49,7 @@ jobs:
         cd android-kernel
         
         # Setup KernelSU
-        curl -fsSL "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        curl -fsSL "https://raw.githubusercontent.com/5ec1cff/KernelSU/main/kernel/setup.sh" | bash -s main
         
         # Get KSU version
         cd KernelSU
