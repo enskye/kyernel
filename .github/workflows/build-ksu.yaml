@@ -80,8 +80,10 @@ jobs:
         cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
         cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
         cp kernel_patches/hooks/60_scope-minimized_manual_hooks.patch  ./common/
+        cp kernel_patches/knsu/kernelnosu.patch KernelSU/
         cd KernelSU
-        patch -p1 --fuzz=5 < 10_enable_susfs_for_ksu.patch
+        patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
+        patch -p1 --fuzz=3 < kernelnosu.patch
         curl "https://github.com/backslashxx/KernelSU/commit/1854e961c623e83ccd075a54f2a7da414bb5b58f.patch" || patch -p1 -F=3
         cd ../common
         patch -p1 --fuzz=5 < 50_add_susfs_in_gki-android14-6.1.patch
