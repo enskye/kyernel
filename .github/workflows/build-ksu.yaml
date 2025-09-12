@@ -49,7 +49,7 @@ jobs:
         cd android-kernel
         
         # Setup KernelSU
-        curl -fsSL "https://raw.githubusercontent.com/0ctobot/neutrino_kernel_google_caimito/57252208df8b8e8f02aad39b11c0808c4c2c5fc9/kernel/setup.sh" | bash -s 5725220
+        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
         
         # Get KSU version
         cd KernelSU
@@ -64,63 +64,11 @@ jobs:
     - name: Clone repositories
       run: |
         cd android-kernel
-        
-        # Clone SUSFS
-        git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.1 susfs4ksu
-        
-        # Clone hooks patches
-        git clone --depth=1 https://github.com/enskye/kernel_patches.git -b main kernel_patches
 
         # Clone AnyKernel3
         git clone --depth=1 https://github.com/enskye/AnyKernel3.git -b gki-2.0 AnyKernel3
         
-        # Apply SUSFS patches
-        cp susfs4ksu/kernel_patches/fs/* ./common/fs/
-        # cp susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
-        #cp susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-        #cp susfs4ksu/kernel_patches/50_add_susfs_in_gki-android14-6.1.patch ./common/
-        #cp kernel_patches/hooks/60_scope-minimized_manual_hooks.patch  ./common/
-        cp kernel_patches/test/ksu_safemode.patch ./common/
-        cp kernel_patches/test/manual_1.5.patch ./common/
-        cp kernel_patches/test/susfs_lite.patch ./common/
-        cd ./common/
-        patch -p1 --fuzz=3 < ksu_safemode.patch || true
-        patch -p1 --fuzz=3 < manual_1.5.patch || true
-        patch -p1 --fuzz=3 < susfs_lite.patch || true
-        #cd KernelSU
-        #patch -p1 --fuzz=3 < 10_enable_susfs_for_ksu.patch
-        #cd ../common
-        #patch -p1 --fuzz=3 < 50_add_susfs_in_gki-android14-6.1.patch
-        #patch -p1 --fuzz=3 < 60_scope-minimized_manual_hooks.patch
         
-        
-    - name: Configure kernel options
-      run: |
-        cd android-kernel/common/arch/arm64/configs
-        echo "CONFIG_KSU=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_HAS_MAGIC_MOUNT=n" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_KSU_DEFAULT_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_AUTO_ADD_SUS_BIND_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_USFS_AUTO_ADD_TRY_UMOUNT_FOR_BIND_MOUNT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_OPEN_REDIRECT=y" >> gki_defconfig
-        echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> gki_defconfig
-        echo "CONFIG_KSU_KPROBES_HOOK=n" >> gki_defconfig
-
-        # Apply additional configs
-        
-        echo "CONFIG_OVERLAY_FS=y" >> gki_defconfig
-        echo "CONFIG_TMPFS_XATTR=y" >> gki_defconfig
-
     - name: Modify uname
       run: |
         cd android-kernel
