@@ -52,7 +52,7 @@ jobs:
         curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
         
         # Get KSU version
-        cd KernelSU
+        cd KernelSU-Next
         BASE_VERSION=10200
         COMMIT_COUNT=$(git rev-list --count HEAD)
         KSU_VERSION=$((COMMIT_COUNT + BASE_VERSION))
