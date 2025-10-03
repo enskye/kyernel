@@ -21,6 +21,10 @@ jobs:
         depmod --version
         sudo update-alternatives --install /usr/bin/depmod depmod /usr/sbin/depmod 100
         
+        # Create symlinks for Bazel sandbox access
+        sudo ln -sf /usr/sbin/depmod /bin/depmod
+        sudo ln -sf /usr/sbin/depmod /usr/local/bin/depmod
+        
     - name: Setup repo tool
       run: |
         mkdir -p ~/.local/bin
