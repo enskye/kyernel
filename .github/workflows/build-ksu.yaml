@@ -16,6 +16,11 @@ jobs:
           python3 python3-dev libssl-dev cpio rsync \
           zip unzip libelf-dev kmod
         
+        # Verify kmod installation and ensure correct depmod is used
+        which depmod
+        depmod --version
+        sudo update-alternatives --install /usr/bin/depmod depmod /usr/sbin/depmod 100
+        
     - name: Setup repo tool
       run: |
         mkdir -p ~/.local/bin
