@@ -21,6 +21,11 @@ jobs:
         depmod --version
         sudo update-alternatives --install /usr/bin/depmod depmod /usr/sbin/depmod 100
         
+        # Check for and remove any BusyBox depmod
+        if [ -f /usr/bin/busybox ] && /usr/bin/busybox --list | grep -q depmod; then
+          sudo rm -f /bin/depmod /sbin/depmod
+        fi
+        
         # Create symlinks for Bazel sandbox access
         sudo ln -sf /usr/sbin/depmod /bin/depmod
         sudo ln -sf /usr/sbin/depmod /usr/local/bin/depmod
@@ -141,7 +146,7 @@ jobs:
         echo 'build --action_env=PATH=/usr/sbin:/usr/bin:/bin' >> .bazelrc
         
         # Use the kernel's built-in bazel wrapper (tools/bazel)
-        tools/bazel run //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin -- --destdir=out/dist
+        tools/bazel run //common:kernel_aarch64_dist --config=fast --config=stamp --lto=thin --action_env=PATH=/usr/sbin:/usr/bin:/bin -- --destdir=out/dist
 
     - name: Package with AnyKernel3
       run: |
