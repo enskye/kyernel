@@ -28,7 +28,7 @@ jobs:
         git config --global user.name "GitHub Actions"
         git config --global user.email "actions@github.com"
         mkdir android-kernel && cd android-kernel
-        repo init -u https://android.googlesource.com/kernel/manifest -b common-android14-6.6-2025-08 --depth=1
+        repo init -u https://android.googlesource.com/kernel/manifest -b common-android15-6.6-2025-08 --depth=1
         repo sync -j$(nproc)
         
     - name: Setup KernelSU
@@ -46,7 +46,7 @@ jobs:
     - name: Setup SUSFS4KSU
       run: |
         cd android-kernel
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android14-6.6 susfs4ksu
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git -b gki-android15-6.6 susfs4ksu
         
 
     - name: Configure defconfig
